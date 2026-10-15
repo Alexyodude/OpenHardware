@@ -2,15 +2,12 @@
 id: OH-233
 title: 'The page could say how far behind real time a board runs, but no route sends
   it the board''s clock: as_json gains cpu_hz'
-status: in-progress
+status: done
 priority: P3
 created: '2026-10-13'
 touches:
 - webui/static/clock.js
 - tests/webui/test_clock.py
-- webui/api.py
-- webui/static/emulator.js
-- tests/webui/test_board_run.py
 ---
 
 OH-221's step 3, decided and left (2026-10-13): the page shows "N steps/s" beside the run button, and for a board whose description records a clock it could say how far behind real time that is -- a C3's delay(500) takes about 21 s of wall time on the Release core on one machine (webui/static/clock.js holds the dated measurement). It does not, because no route sends the page a clock: `/api/board/load` answers `BoardSession.as_json` (board, chip, core, format, bytes, entry, notes) and `/api/board/run` answers steps, status and detail.
@@ -39,3 +36,5 @@ Claims: webui/api.py is OH-172's (lent to OH-161), webui/static/emulator.js OH-2
 **Note 2026-10-15:** 2026-10-15: the 2026-10-14 note done in 6af5c15. BoardSession.state() carries retired (webui/api.py), so /api/board/state and /api/board/step answer the board's own count; renderBoardState writes the top bar's counter from it and showBoardSteps throws, naming the value, on a reply with no integer. Gone from emulator.js: boardSteps, stepsBefore, the sum in the run tick and in stepLoadedBoard, and the post-load showBoardSteps(0) calls (the state read after each load answers 0); the pre-load clear for a refused load stays. The run and step replies need no retired: the page follows each with a state read. A run of one then the state read stays the step's shape (test_editor.py pins it); test_board_session_fault.py's PAGE_STUBS still declares let boardSteps, now unused and harmless, and is not this ticket's. Tests: test_the_state_reply_carries_the_boards_own_retired_count (route) and the own scenario of test_the_top_bars_counter_shows_the_boards_instructions (page, a fake board that counts steps the page never saw), each seen to fail first. run() adds its taken count after the loop, so a non-Abi exception out of the core mid-run loses that run's count from retired; nothing raises one today. Release webui/api.py, webui/static/emulator.js and tests/webui/test_board_run.py back to OH-161 and drop the clock.js/test_clock.py claims on close.
 
 **Note 2026-10-15:** 2026-10-15: review fix in the commit before this note: showBoardSteps(state.retired) is now the last line of renderBoardState, so a state answer with no retired draws the pc, the watch note, the pins and the toolbar and then throws, naming the field and the value; test_clock.py's counter test has the case (seen to fail with the throw mid-function: where '0000:0000', machine 'i8086').
+
+**Note 2026-10-15:** 2026-10-15: done, merged to master (923ae28): cpu_hz on load, the run line's 1/N of real time, and the top bar's counter from state()'s retired. Returns webui/api.py, webui/static/emulator.js and tests/webui/test_board_run.py to OH-161. Left: run() adds taken after its loop, so an exception mid-run would lose that run's count (nothing raises one today); test_board_session_fault.py's PAGE_STUBS still declares an unused boardSteps.
