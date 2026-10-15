@@ -3286,3 +3286,6 @@ def test_the_load_reply_carries_the_boards_clock_where_one_is_recorded(live_serv
     assert got == expected, (
         f"cpu_hz on /api/board/load: expected {expected}, got {got}; "
         f"not checked, image missing: {missing}")
+    if missing:
+        pytest.skip(f"SKIPPED: checked and matched {sorted(got)}; "
+                    f"not checked, image missing for {missing}")
