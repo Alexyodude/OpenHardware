@@ -1823,15 +1823,15 @@ def test_every_resolved_pad_of_a_generated_board_file_says_where_its_pin_came_fr
     resolved, and absent on one that is not -- as `why_null` is absent on a
     resolved pad, the one field there is for the other half.
 
-    **The Arduino Uno is not checked**: it is not in the registry, and its
-    pins are measured off PICSimLab's own board.svg by `webui/pinmap.py`, not
-    read by this tool, which is what writes the field.
+    **The Arduino Uno is checked too**, though it is not in the registry: its
+    file is maintained by hand (OH-170 step 1, OH-201), its pins are
+    Arduino's own AVR variant checked against Arduino's board file, and its
+    22 resolved pads say `own` so that a missing key never means "never
+    generated".
     """
     wrong: list[str] = []
     checked = 0
     for path in sorted(BOARDS_DIR.glob("*.json")):
-        if path.stem not in pindefs.BOARDS:
-            continue
         for pad in json.loads(path.read_text(encoding="utf-8"))["pads"]:
             checked += 1
             source = pad.get("pin_source")
@@ -1843,6 +1843,21 @@ def test_every_resolved_pad_of_a_generated_board_file_says_where_its_pin_came_fr
                              f"pin_source {source!r}, expected none")
     assert checked > 500, checked
     assert not wrong, wrong
+
+
+def test_a_source_that_reads_every_variant_of_a_chip_is_marked_family():
+    """OH-173: `Source.family` is what makes a pad say `family`, and it is a
+    flag set by hand. A source that expands over a chip's variants
+    (`expand`, as `arduino_chip` does) reads files about other boards; one
+    without the flag would make its pads say `own` in silence, and the other
+    way round would call a board's own file `family`. Walk the registry."""
+    wrong = [f"{name}: {source.package} {source.paths}: expand is "
+             f"{'set' if source.expand is not None else 'None'}, family is {source.family}"
+             for name, board in sorted(pindefs.BOARDS.items())
+             for source in board.sources
+             if (source.expand is not None) != source.family]
+    assert not wrong, wrong
+    assert any(source.family for board in pindefs.BOARDS.values() for source in board.sources)
 
 
 def test_the_s3s_usb_pads_rest_on_the_same_five_variants_as_its_jtag():
