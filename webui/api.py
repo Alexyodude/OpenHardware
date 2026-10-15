@@ -1889,6 +1889,12 @@ class BoardSession:
             "chip": self.chip,
             "status": self.status,
             "detail": self.detail,
+            # The board's own count of instructions retired since its image
+            # was loaded (OH-233), which the page writes to the top bar's
+            # counter. It used to add up run replies instead, and so could
+            # drift from this number across a Run, a Stop, a step and a
+            # reload; a session is made by a load, so this starts at 0 there.
+            "retired": self.retired,
             # **Named, not positional, and that is a wire change made on
             # purpose.** A page cannot render an AVR's thirty-two eight-bit
             # registers through a sixteen-name Arm table, and `width` is here

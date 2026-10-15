@@ -549,7 +549,12 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
     * `race`: Run, Stop, Run with the first tick still in flight when the
       second Run is pressed, held by the fake until after that press;
     * `reload`: the same zeroing through load-artefact and through compile;
-    * `refused`: a load the server refuses clears the old board's count.
+    * `refused`: a load the server refuses clears the old board's count;
+    * `own` (OH-233): the count is the board's own, from its state reply, and
+      not a sum the page keeps. The fake board counts what its run replies
+      said and also what the page never saw (`bump`: a drive's stepping, a
+      second tab), so a counter that adds up run replies reads low by
+      exactly that much, across a step, a Run, a Stop and a Run again.
     """
     source = EMULATOR.read_text(encoding="utf-8")
     result = probe(tmp_path, """
@@ -588,6 +593,9 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
           let refuse = false;
           let inFlight = 0;
           let most = 0;
+          // The fake board's own count, as `BoardSession.retired` keeps it:
+          // zero at every load, what each run reply said, and `bump`.
+          let retired = 0;
           const state = {
             board: "xiao", chip: "c3", status: "running", detail: "",
             registers: [{ name: "pc", value: 0, width: 32 }], flags: [],
@@ -605,9 +613,11 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
                        json: async () => ({ error: "refused" }) };
             }
             if (path === "/api/board/load" || path === "/api/board/load-artefact") {
+              retired = 0;
               return reply(image);
             }
             if (path === "/api/board/compile") {
+              retired = 0;
               return reply({ ok: true, bytes: 4, board: image });
             }
             if (path === "/api/board/run") {
@@ -615,7 +625,9 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
               inFlight += 1;
               most = Math.max(most, inFlight);
               try {
-                return reply(await runs(JSON.parse(options.body), calls));
+                const said = await runs(JSON.parse(options.body), calls);
+                retired += said.steps;
+                return reply(said);
               } finally {
                 inFlight -= 1;
               }
@@ -632,7 +644,7 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
                              flags: {}, disassembly: [],
                              memory: { address: 0, bytes: [] } });
             }
-            if (path.startsWith("/api/board/state")) return reply(state);
+            if (path.startsWith("/api/board/state")) return reply({ ...state, retired });
             return { ok: false, status: 404,
                      json: async () => ({ error: "unrouted " + path }) };
           }
@@ -658,6 +670,8 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
             most: () => most,
             machine: () => document.getElementById("machine").textContent,
             refuse: (on) => { refuse = on; },
+            bump: (n) => { retired += n; },
+            retiredNow: () => retired,
             text: () => counter.textContent,
             click: (id) => document.getElementById(id).handlers.click(),
           };
@@ -756,6 +770,21 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
         await refused.click("board-load");
         const afterRefusal = refused.text();
 
+        // -- the board's own count wins over anything the page could add up
+        const own = await page({ runs: ticking });
+        await own.click("board-load");
+        const ownTexts = [];
+        own.bump(5000);                        // retired where the page never saw
+        await own.click("board-step");         // the reply said 1000; the board 6000
+        ownTexts.push([own.text(), own.retiredNow()]);
+        await runThenStop(own);
+        ownTexts.push([own.text(), own.retiredNow()]);
+        own.bump(300);
+        await own.click("board-step");
+        ownTexts.push([own.text(), own.retiredNow()]);
+        await runThenStop(own);
+        ownTexts.push([own.text(), own.retiredNow()]);
+
         // -- the 8086 takes the panes while a board tick is in flight
         let over = false;
         let letGo;
@@ -804,7 +833,7 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
           mainText, mainAsked: main.asked(), expectedAsked,
           expect: [0, 3000, 3001, 3002, 3002, 0].map(steps),
           afterFirst, afterSecond, raceResult, viaRoutes,
-          beforeRefusal, afterRefusal,
+          beforeRefusal, afterRefusal, ownTexts,
         }));
     """ % json.dumps(source))
     assert result["mainText"] == result["expect"], result
@@ -826,6 +855,14 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
         assert before != "0 steps" and after == "0 steps", (route, result)
     assert result["beforeRefusal"] != "0 steps", result
     assert result["afterRefusal"] == "0 steps", result
+    # The counter is whatever the board's state said at that moment, written
+    # by the page as it came. `retiredNow` is the fake board's own number,
+    # which includes the 5,000 and the 300 no reply carried.
+    wrong = [(text, board) for text, board in result["ownTexts"]
+             if text != f"{board:,} steps"]
+    assert not wrong and len(result["ownTexts"]) == 4, (
+        f"counter text vs the board's own retired count, each as "
+        f"(text, board): {wrong}; all: {result['ownTexts']}")
 
 
 # --- how far behind real time a run is (OH-233) --------------------------------
@@ -895,7 +932,7 @@ def test_the_run_line_says_how_far_behind_real_time_only_where_a_clock_is_known(
             registers: [{ name: "pc", value: 0, width: 32 }], flags: [],
             pc: 0, memory: { at: 0, bytes: [] }, words: [],
             uart: { present: false, note: "" }, pins: null,
-            listing: { present: false, note: "" },
+            listing: { present: false, note: "" }, retired: 0,
           };
           const reply = (body) => ({ ok: true, status: 200, json: async () => body });
           async function fetch(path) {

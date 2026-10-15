@@ -3289,3 +3289,38 @@ def test_the_load_reply_carries_the_boards_clock_where_one_is_recorded(live_serv
     if missing:
         pytest.skip(f"SKIPPED: checked and matched {sorted(got)}; "
                     f"not checked, image missing for {missing}")
+
+
+def test_the_state_reply_carries_the_boards_own_retired_count(live_server):
+    """`retired` on `/api/board/state` and `/api/board/step` (OH-233).
+
+    The page's counter used to be the page's own sum of run replies, because
+    only `/api/board/drive` said how many instructions the board had retired.
+    The count is the session's (`BoardSession.retired`, which `drive` stamps
+    the replay record with), so it rides the state, and the page writes it.
+    One quiet image, so nothing but the steps asked for moves the count:
+    load answers 0, a run and a step add what they report, a read in between
+    changes nothing, and a reload starts again from 0."""
+    needs_core()
+    if not QUIET_IMAGE.is_file():
+        pytest.skip(f"{QUIET_IMAGE} is missing")
+    load = upload(QUIET_IMAGE.read_bytes(), board=QUIET_BOARD, base=0)
+    post(live_server, "/api/board/load", load)
+    seen = [("after load", get(live_server, "/api/board/state").get("retired"))]
+    expected = [("after load", 0)]
+    total = 0
+    for what, route, body in (("a run of 1,234", "/api/board/run", {"steps": 1_234}),
+                              ("a run of 77", "/api/board/run", {"steps": 77})):
+        total += post(live_server, route, body)["steps"]
+        seen.append((what, get(live_server, "/api/board/state").get("retired")))
+        expected.append((what, total))
+    stepped = post(live_server, "/api/board/step", {"count": 3})
+    total += 3
+    seen.append(("a step of 3, in its own reply", stepped.get("retired")))
+    expected.append(("a step of 3, in its own reply", total))
+    seen.append(("a read after the step", get(live_server, "/api/board/state").get("retired")))
+    expected.append(("a read after the step", total))
+    post(live_server, "/api/board/load", load)
+    seen.append(("after a reload", get(live_server, "/api/board/state").get("retired")))
+    expected.append(("after a reload", 0))
+    assert seen == expected, f"retired by the board's own state: expected {expected}, got {seen}"

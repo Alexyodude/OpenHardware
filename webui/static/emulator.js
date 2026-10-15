@@ -575,7 +575,6 @@ async function loadBoardImage() {
   $("board-step").disabled = true;
   try {
     boardImage = await api("/api/board/load", request);
-    showBoardSteps(0);
   } catch (error) {
     $("board-console").textContent = "";
     boardSays("Nothing loaded yet.", error.message);
@@ -847,7 +846,6 @@ async function buildSketch() {
       return;
     }
     boardImage = built.board;
-    showBoardSteps(0);
     $("board-go").disabled = false;
   $("board-step").disabled = false;
     $("board-console").textContent = "";
@@ -882,16 +880,25 @@ let boardRunning = null;
 /** Instructions the loaded board has retired since its image was loaded, and
  *  what the top bar's counter shows while a board owns the panes (OH-232).
  *
- *  **The page adds it up, because the board's state reply does not carry it.**
- *  `/api/board/run` answers the instructions that call took and
- *  `/api/board/state` answers none, so a run's tick adds the clock's total to
- *  the count it started from, and a step is a run of one whose `steps` is
- *  added. `renderStatus` writes the same element for the 8086, and
- *  never runs while a board owns the panes -- `refresh` returns first. */
-let boardSteps = 0;
-
+ *  **The board says it, and the page keeps no count of its own** (OH-233).
+ *  `/api/board/state` carries `retired`, the session's own number, and
+ *  `renderBoardState` writes it here after every run tick, step and load.
+ *  OH-232 had the page add up run replies instead, a base kept across Run
+ *  presses plus each tick's total, because the state reply carried no count;
+ *  that sum could disagree with the board by anything the page did not see
+ *  (a drive's stepping, a second tab) and needed a wait on every path that
+ *  could race it. `renderStatus` writes the same element for the 8086, and
+ *  never runs while a board owns the panes -- `refresh` returns first.
+ *
+ *  Thrown, with the value, when the reply carries no integer: a server too
+ *  old to say would otherwise print "undefined steps" beside a running
+ *  board. */
 function showBoardSteps(total) {
-  boardSteps = total;
+  if (!Number.isInteger(total)) {
+    throw new Error(
+      `the board's state carried no retired count: expected an integer, ` +
+      `got ${JSON.stringify(total)}`);
+  }
   $("counter").textContent = `${total.toLocaleString()} steps`;
 }
 
@@ -1040,12 +1047,10 @@ async function runLoadedBoard() {
   }
 
   // Run, Stop, Run: `stop()` clears `running` at once, but the last tick is
-  // still in flight and its `onTick` has yet to write. The base is taken only
-  // after it has, or the new clock's first write would erase that tick.
+  // still in flight. Wait for it, so two presses behind one held tick make one
+  // clock and not two.
   await boardRunning?.catch(() => {});
   if (boardClock?.running) return;
-  // The clock counts from zero each time it starts; the board's total does not.
-  const stepsBefore = boardSteps;
   boardClock = new window.BoardClock.Clock({
     run: (steps) => api("/api/board/run", { steps }),
     now: () => performance.now(),
@@ -1056,7 +1061,6 @@ async function runLoadedBoard() {
       const state = await api(boardStateUrl());
       renderBoardConsole(state.uart);
       renderBoardState(state);
-      showBoardSteps(stepsBefore + report.steps);
       boardSays(runLine(report), stopDetail(report.status, report.detail));
     },
   });
@@ -1083,14 +1087,13 @@ async function runLoadedBoard() {
 async function stepLoadedBoard() {
   await stopBoardClock();
   showBoardRunning(false);
-  // `/api/board/step` is `run(count=1)` and then the state, and answers
-  // neither how many instructions retired; `/api/board/run` answers `steps`,
-  // so a step is a run of one followed by the state read. An instruction that
-  // retires and then stops the board counts 1, and a refusal counts 0.
-  const taken = await api("/api/board/run", { steps: 1 });
+  // A run of one, then the state read through the watch. The counter is
+  // whatever that state says the board has retired (`renderBoardState`), so an
+  // instruction that retires and then stops the board counts and a refusal
+  // does not, because the board counted them, not this function.
+  await api("/api/board/run", { steps: 1 });
   const state = await api(boardStateUrl());
   renderBoardState(state);
-  showBoardSteps(boardSteps + taken.steps);
   boardSays(stepLine(boardImage.board, state, $("where").textContent),
             stopDetail(state.status, state.detail));
 }
@@ -1204,6 +1207,8 @@ function renderBoardState(state) {
   renderBoardFlags(state.flags);
   renderBoardListing(state.listing);
   renderMemory({ address: state.memory.at, bytes: state.memory.bytes });
+  // The top bar's counter is the board's own (OH-233); see `showBoardSteps`.
+  showBoardSteps(state.retired);
   // Found by name rather than at position 15, which is the program counter on
   // Armv6-M and an ordinary working register on an AVR. Every machine's view carries a register
   // called `pc` -- `test_every_machine_view_carries_a_register_called_pc` is
