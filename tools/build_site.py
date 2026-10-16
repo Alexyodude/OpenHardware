@@ -18,7 +18,7 @@ folder this writes.
 
 | in `build/site/`      | from                                                   |
 |---|---|
-| `index.html`, page JS | `webui/static/`, with the transport added by `page()`  |
+| `index.html`, page JS | `webui/static/`; `page()` adds the transport and notice |
 | `inpage/`             | `webui/static/inpage/`                                 |
 | `pyodide/`            | the pinned Pyodide release, fetched and sha256-checked |
 | `openhardware.zip`    | `BUNDLE`, plus every core compiled by `wasm_cores()`   |
@@ -144,6 +144,7 @@ PAGE_FILES = (
     "vendor/LICENSE",
     "inpage/transport.js",
     "inpage/worker.js",
+    "inpage/inpage.css",
 )
 
 #: The Python the page runs, as globs from the repository root.
@@ -354,6 +355,50 @@ def bundle(cores: list[pathlib.Path], dest: pathlib.Path) -> pathlib.Path:
 EMULATOR_SCRIPT = '<script src="/emulator.js"></script>'
 TRANSPORT_SCRIPT = '<script src="inpage/transport.js"></script>'
 
+#: The page's stylesheet, and the notice's, which follows it (OH-239).
+EMULATOR_STYLE = '<link rel="stylesheet" href="/emulator.css" />'
+INPAGE_STYLE = '<link rel="stylesheet" href="inpage/inpage.css" />'
+
+#: The toolbar. The notice goes above it, so it is the first thing read.
+TOOLBAR = '<div class="bar">'
+
+#: Where this copy runs and what it cannot do there, before anything else on
+#: the page. `#inpage-status` is where `inpage/transport.js` reports the
+#: runtime starting, and why, if it did not.
+NOTICE = """<aside class="inpage" aria-label="About this copy">
+  <p><strong>This copy of OpenHardware runs in your browser, with no
+    server.</strong> <span id="inpage-status" role="status">Starting…</span></p>
+  <p>It runs the sample programs, and any firmware image you built yourself:
+    pick a board and load the image in the board panel. It cannot compile a
+    sketch, which needs a toolchain; for that, run
+    <code>python webui/emulator_server.py</code> from a checkout.</p>
+</aside>"""
+
+#: The Build button, disabled in the page itself rather than by a script.
+#: `emulator.js` greys it only once `/api/board/pins` answers, which at first
+#: load it refuses -- no board is loaded -- so a script-free page would offer
+#: a button whose every press is refused.
+BUILD_BUTTON = '<button id="sketch-build" class="primary">'
+BUILD_BUTTON_HERE = ('<button id="sketch-build" class="primary" disabled '
+                     'title="Compiling needs the local server">')
+
+#: The line beside it, which said "Uses the board picked above."
+SKETCH_REPORT = '<span class="note" id="sketch-report">Uses the board picked above.</span>'
+SKETCH_REPORT_HERE = ('<span class="note" id="sketch-report">Compiling needs the '
+                      'local server, and this copy has none: load an image you '
+                      'built in the board panel above.</span>')
+
+#: Each `(anchor, replacement)` `page()` makes in `emulator.html`. Every
+#: anchor must be there exactly once: an anchor that moved would otherwise
+#: leave the page silently without the notice, or with a live Build button.
+ADAPTATIONS = (
+    (EMULATOR_STYLE, f"{EMULATOR_STYLE}\n{INPAGE_STYLE}"),
+    (TOOLBAR, f"{NOTICE}\n\n{TOOLBAR}"),
+    (BUILD_BUTTON, BUILD_BUTTON_HERE),
+    (SKETCH_REPORT, SKETCH_REPORT_HERE),
+    (EMULATOR_SCRIPT, f"{TRANSPORT_SCRIPT}\n{EMULATOR_SCRIPT}"),
+)
+
 
 def _once(html: str, anchor: str) -> None:
     count = html.count(anchor)
@@ -363,14 +408,17 @@ def _once(html: str, anchor: str) -> None:
 
 
 def page(html: str) -> str:
-    """`emulator.html` -> the static site's `index.html`.
+    """`emulator.html` -> the static site's `index.html`: `ADAPTATIONS`.
 
     The transport goes first, so that every `fetch` the page's own scripts
     make -- `emulator.js` is a classic script and runs as soon as it is
     parsed -- already finds it in place.
     """
-    _once(html, EMULATOR_SCRIPT)
-    return html.replace(EMULATOR_SCRIPT, f"{TRANSPORT_SCRIPT}\n{EMULATOR_SCRIPT}")
+    for anchor, _ in ADAPTATIONS:
+        _once(html, anchor)
+    for anchor, replacement in ADAPTATIONS:
+        html = html.replace(anchor, replacement)
+    return html
 
 
 # --- the whole thing ----------------------------------------------------------

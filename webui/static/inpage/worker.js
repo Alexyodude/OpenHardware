@@ -55,7 +55,7 @@ async function boot() {
 boot().then(
   () => postMessage({
     type: "ready",
-    text: "Running in your browser: nothing you load leaves this tab.",
+    text: "Ready: nothing you load leaves this tab.",
   }),
   (error) => postMessage({ type: "failed", error: String(error) }),
 );

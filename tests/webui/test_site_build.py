@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import json
 import pathlib
+import re
 import tarfile
 import zipfile
 
@@ -34,7 +35,45 @@ def test_the_transport_is_loaded_immediately_before_emulator_js():
 
 def test_the_page_is_otherwise_emulator_html_unchanged():
     built = build_site.page(EMULATOR_HTML)
-    assert built.replace(f"{build_site.TRANSPORT_SCRIPT}\n", "", 1) == EMULATOR_HTML
+    for anchor, replacement in reversed(build_site.ADAPTATIONS):
+        built = built.replace(replacement, anchor, 1)
+    assert built == EMULATOR_HTML
+
+
+def test_the_build_button_is_disabled_by_the_page_itself():
+    """Not by a script: emulator.js greys it only after /api/board/pins
+    answers, which it refuses at first load with no board loaded."""
+    built = build_site.page(EMULATOR_HTML)
+    button = re.search(r'<button id="sketch-build"[^>]*>', built).group(0)
+    assert " disabled " in button
+
+
+def test_the_notice_comes_before_the_toolbar_and_names_the_server():
+    built = build_site.page(EMULATOR_HTML)
+    assert built.index(build_site.NOTICE) < built.index(build_site.TOOLBAR)
+    assert "python webui/emulator_server.py" in build_site.NOTICE
+
+
+def test_the_notice_has_the_element_the_transport_reports_progress_into():
+    transport = (build_site.STATIC / "inpage" / "transport.js").read_text(
+        encoding="utf-8")
+    written = re.search(r'getElementById\("([^"]+)"\)', transport).group(1)
+    assert f'id="{written}"' in build_site.page(EMULATOR_HTML)
+
+
+def test_every_file_the_adaptations_load_is_shipped():
+    """A relative href or src page() adds is a file the site must carry."""
+    added = re.findall(r'(?:href|src)="([^"/][^"]*)"',
+                       "".join(new for _, new in build_site.ADAPTATIONS))
+    assert sorted(added) == ["inpage/inpage.css", "inpage/transport.js"]
+    assert set(added) <= set(build_site.PAGE_FILES)
+
+
+def test_a_page_missing_any_anchor_is_refused_by_name():
+    for anchor, _ in build_site.ADAPTATIONS:
+        html = EMULATOR_HTML.replace(anchor, "")
+        with pytest.raises(build_site.SiteError, match=re.escape(f"{anchor!r} 0 times")):
+            build_site.page(html)
 
 
 def test_a_page_without_emulator_js_is_refused_by_name():

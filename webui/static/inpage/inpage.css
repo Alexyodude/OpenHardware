@@ -1,0 +1,21 @@
+/* OpenHardware - the static build's notice (OH-239).
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+ *
+ * Loaded only by the index.html tools/build_site.py writes; the page the
+ * local server serves never carries the notice this styles. Colours are the
+ * page's own variables from emulator.css, so the notice follows its light and
+ * dark themes rather than carrying a third.
+ */
+
+.inpage {
+  padding: 8px 16px;
+  background: var(--accent-wash);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 13px;
+}
+.inpage p { margin: 2px 0; max-width: 72em; }
+.inpage code { font-family: var(--mono); }
+#inpage-status { color: var(--muted); }
