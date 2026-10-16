@@ -3,6 +3,17 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 
+# The version a release tag must name -- .github/workflows/pages.yml refuses
+# a v* tag that is not "v" and this -- and the one the static page states
+# (OH-243). There is no [build-system]: nothing here is installed as a
+# package, and this table is read, not built.
+[project]
+name = "openhardware"
+version = "0.1.0"
+description = "Hardware simulation in a browser: CPU cores, MCU boards and their peripherals"
+license = "MIT"
+requires-python = ">=3.11"
+
 [tool.pytest.ini_options]
 # importlib, not the default `prepend`.
 #

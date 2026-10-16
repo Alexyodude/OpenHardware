@@ -51,14 +51,15 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import sys
 import typing
 
 try:
-    from tools import board_sources
+    from tools import board_sources, import_3d_model
 except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-    from tools import board_sources
+    from tools import board_sources, import_3d_model
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 MODELS = REPO / "webui" / "static" / "models"
@@ -68,7 +69,8 @@ SHIPPED_AS = "CC BY-SA 4.0"
 CC_BY_SA_4 = "https://creativecommons.org/licenses/by-sa/4.0/"
 
 #: Where `models/parts/` comes from: a part from anywhere else is refused.
-KICAD_PACKAGES3D = "https://gitlab.com/kicad/libraries/kicad-packages3D/"
+#: Read from the importer, which CLAUDE.md names as that URL's one home.
+KICAD_PACKAGES3D = import_3d_model.KICAD_3D.removesuffix("-/raw/master")
 
 
 #: The licences, as `tools/board_sources.py` names them, a board file may be
@@ -185,6 +187,11 @@ RUNTIME_TEXTS: dict[str, Pinned] = {
         "c695d550b135e53e38807e76496d1db17d22c40e461d1f3f354c86188d3305dd", 57595),
 }
 
+#: Where the source of the runtime's releases is. MPL-2.0 section 3.2(a):
+#: whoever distributes Pyodide in executable form says where its source is.
+PYODIDE_SOURCE = "https://github.com/pyodide/pyodide/tree/314.0.7"
+CPYTHON_SOURCE = "https://github.com/python/cpython/tree/v3.14.2"
+
 #: Read from the Emscripten tree, relative to its `upstream/emscripten/`.
 EMSCRIPTEN_TEXTS: dict[str, str] = {
     "Emscripten (MIT or NCSA)": "LICENSE",
@@ -196,9 +203,27 @@ EMSCRIPTEN_TEXTS: dict[str, str] = {
 }
 
 
+def _repository(pin: Pinned) -> re.Pattern[str]:
+    """Any URL into the repository a pinned licence text is from: its raw
+    files, as `components` in models/index.json cites them, or its clone URL,
+    as `tools/board_sources.py` does."""
+    prefix = "https://raw.githubusercontent.com/"
+    if not pin.url.startswith(prefix):
+        raise ValueError(f"{pin.url} is not under {prefix}: say which "
+                         f"repository its text belongs to some other way")
+    owner, name = pin.url.removeprefix(prefix).split("/")[:2]
+    return re.compile(rf"/{re.escape(owner)}/{re.escape(name)}(?:/|\.git\b)")
+
+
+def owed_notices(text: str) -> set[str]:
+    """Every `NOTICE_TEXTS` key whose repository `text` names a file in."""
+    return {key for key, pin in NOTICE_TEXTS.items() if _repository(pin).search(text)}
+
+
 def board_licence(row: Ships) -> board_sources.Licence:
     """The licence of a shipped row's board file, refused unless it allows
-    shipping: one of `SHIPPABLE`, read from a licence file."""
+    shipping: one of `SHIPPABLE`, read from a licence file, and when that is
+    MIT, its text pinned here and named in the row."""
     sources = {source.name: source for source in board_sources.SOURCES}
     if row.source not in sources:
         raise NotShippable(f"{row.source!r} is no source in tools/board_sources.py")
@@ -210,6 +235,12 @@ def board_licence(row: Ships) -> board_sources.Licence:
     if licence.name not in SHIPPABLE:
         raise NotShippable(f"{row.source} is under {licence.name}, which is not "
                            f"one of {sorted(SHIPPABLE)}")
+    url = sources[row.source].fetch.url
+    if licence.name == "MIT" and not owed_notices(url) & set(row.notices):
+        raise NotShippable(f"{row.source}'s board file is MIT, whose text must "
+                           f"travel with a model drawn from it: pin {url}'s "
+                           f"LICENSE in NOTICE_TEXTS and name it in the row, "
+                           f"which names {list(row.notices)}")
     return licence
 
 
@@ -261,6 +292,14 @@ def select(index: dict[str, object], on_disk: list[str]) -> Selection:
         name = _file(entry)
         row = decide(name)
         if isinstance(row, Ships):
+            # What the model draws is in its own entry -- `components` cites
+            # each mesh by URL -- so the notices it owes are read from there,
+            # not only from the row someone wrote.
+            missing = owed_notices(json.dumps(entry)) - set(row.notices)
+            if missing:
+                raise NotShippable(f"models/{name} draws from {sorted(missing)}, "
+                                   f"whose text must travel with it, and its "
+                                   f"row names {list(row.notices)}")
             boards[board] = entry
             shipped[name] = row
         else:
@@ -329,6 +368,12 @@ def runtime_notice(texts: dict[str, str]) -> str:
         "from. This site also carries, unmodified, the Pyodide runtime -- "
         "CPython compiled to WebAssembly by Emscripten -- whose licences "
         "follow, and three.js, whose licence is vendor/LICENSE.",
+        "",
+        f"Pyodide's source, as the release here was built from it: "
+        f"{PYODIDE_SOURCE}. CPython's: {CPYTHON_SOURCE}.",
+        "",
+        "The 3D models' notices -- whose each is, and the licence it is "
+        "published under -- are in models/NOTICE.txt.",
     ]
     for title in [*RUNTIME_TEXTS, *EMSCRIPTEN_TEXTS]:
         lines += ["", f"## {title}", "", "```text", texts[title].rstrip("\n"), "```"]

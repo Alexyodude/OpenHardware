@@ -17,7 +17,9 @@ import io
 import json
 import pathlib
 import re
+import subprocess
 import tarfile
+import tomllib
 import zipfile
 
 import pytest
@@ -238,7 +240,7 @@ UNO = {"file": "/models/Arduino-Uno.glb", "source": "Arduino's own EAGLE board f
 RP2040 = {"file": "/models/RP2040.glb", "source": "https://files.seeedstudio.com/"}
 KB2040 = {"file": "/models/Adafruit-KB2040.glb", "source": "Adafruit's own board file"}
 LED = {"file": "/models/parts/LED_D3_0mm.glb",
-       "source": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/master/x.step"}
+       "source": f"{build_site.site_licences.KICAD_PACKAGES3D}-/raw/master/x.step"}
 
 
 def _models(root: pathlib.Path, boards: dict[str, dict]) -> pathlib.Path:
@@ -302,3 +304,86 @@ def test_a_runtime_licence_missing_from_emscriptens_tree_is_refused_by_name(
     monkeypatch.setattr(build_site, "fetch_pinned", lambda pin: fetched)
     with pytest.raises(build_site.SiteError, match="Emscripten"):
         build_site.runtime_notice(tmp_path)
+
+
+# --- the release the page says it is (OH-243) ---------------------------------
+
+
+def test_the_page_says_the_version_pyproject_toml_states():
+    stated = tomllib.loads((build_site.REPO / "pyproject.toml").read_text(
+        encoding="utf-8"))["project"]["version"]
+    built = build_site.stamp(build_site.page(EMULATOR_HTML), build_site.version(),
+                             "0123456789ab")
+    assert f"This is OpenHardware {stated}, built from 0123456789ab." in built
+
+
+def test_a_pyproject_stating_no_version_is_refused_by_name(tmp_path):
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[tool.pytest.ini_options]\naddopts = ""\n', encoding="utf-8")
+    with pytest.raises(build_site.SiteError, match="states no \\[project\\] version"):
+        build_site.version(pyproject)
+
+
+def test_a_version_that_is_not_a_string_is_refused_with_what_it_is(tmp_path):
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("[project]\nversion = 1\n", encoding="utf-8")
+    with pytest.raises(build_site.SiteError, match="it has 1"):
+        build_site.version(pyproject)
+
+
+def test_a_pyproject_that_is_not_toml_is_refused_by_name(tmp_path):
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("[project\n", encoding="utf-8")
+    with pytest.raises(build_site.SiteError, match="pyproject.toml could not be read"):
+        build_site.version(pyproject)
+
+
+def test_a_page_without_the_release_slot_is_refused():
+    with pytest.raises(build_site.SiteError, match="inpage-release"):
+        build_site.stamp(EMULATOR_HTML, "0.1.0", "0123456789ab")
+
+
+@pytest.fixture
+def repo(tmp_path) -> pathlib.Path:
+    """A repository with one commit of one file, `page.html`."""
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True,
+                       capture_output=True)
+    git("init", "-q")
+    (tmp_path / "page.html").write_text("<p>one</p>\n", encoding="utf-8")
+    git("add", "page.html")
+    git("-c", "user.name=t", "-c", "user.email=t@example.invalid",
+        "commit", "-q", "-m", "one")
+    return tmp_path
+
+
+def test_a_clean_tree_is_named_by_its_commit_alone(repo):
+    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    assert build_site.commit(repo) == head[:12]
+
+
+def test_a_tree_whose_tracked_file_was_edited_says_so(repo):
+    (repo / "page.html").write_text("<p>two</p>\n", encoding="utf-8")
+    assert build_site.commit(repo).endswith(" with local changes")
+
+
+def test_an_untracked_file_the_build_does_not_ship_is_not_a_local_change(repo):
+    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    (repo / "another-sessions-work.md").write_text("draft\n", encoding="utf-8")
+    assert build_site.commit(repo, [repo / "page.html"]) == head[:12]
+
+
+def test_an_untracked_file_the_build_ships_is_a_local_change(repo):
+    """BUNDLE is globs, so a new file beside the tracked ones ships too."""
+    (repo / "new-board.json").write_text("{}\n", encoding="utf-8")
+    assert build_site.commit(repo, [repo / "page.html", repo / "new-board.json"]
+                             ).endswith(" with local changes")
+
+
+def test_a_folder_that_is_no_repository_is_refused_by_name(tmp_path, monkeypatch):
+    # So a repository somewhere above the temporary folder is not found instead.
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
+    with pytest.raises(build_site.SiteError, match="built from a clone"):
+        build_site.commit(tmp_path)

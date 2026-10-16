@@ -8,9 +8,20 @@ view, and watch live simulator state — in a browser, over loopback, with no
 CDN and no build step. Underneath, a rules engine that refuses to let a check
 pass without having actually checked something.
 
-> **Status: early.** The web UI runs against a real simulator. The x86-16 core
-> is planned, not written. See `docs/features/` for per-feature ledgers, and
-> `docs/known-issues.md` for what is knowingly weak.
+> **Status: early.** The web UI runs against a real simulator, and the
+> emulator page runs its own cores. See `docs/features/` for per-feature
+> ledgers, and `docs/known-issues.md` for what is knowingly weak.
+
+## Try it in your browser
+
+**https://alexyodude.com/OpenHardware/** is the emulator page with no server
+behind it: it runs the i8086 sample programs, and a firmware image you built
+yourself on a board you pick, entirely in your tab. It cannot compile a
+sketch -- for that, run `python webui/emulator_server.py` from a checkout.
+
+It is release 0.1.0. `docs/releases/0.1.0.md` says what is in it, what it
+cannot do, and how to build the same thing yourself with
+`python tools/build_site.py`.
 
 ## This is not a fork of PICSimLab
 

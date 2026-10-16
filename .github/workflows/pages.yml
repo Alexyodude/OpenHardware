@@ -24,7 +24,8 @@
 #      add the tag rule `v*`. The environment GitHub creates allows only the
 #      default branch, and refuses a deploy from a tag until it is told.
 #
-# docs/releases/0.1.0.md gives both as `gh api` commands.
+# docs/releases/publishing.md gives both as `gh api` commands, and the rest
+# of publishing a release.
 
 name: Pages
 
@@ -47,7 +48,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
+      # Nothing later pushes, so the token is not left in .git/config
+      # for the steps after this one to find.
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v7
         with:
@@ -90,6 +95,23 @@ jobs:
       - name: Build the site
         run: python tools/build_site.py
 
+      # The page says which commit it was built from, and a checkout
+      # here is clean, so "with local changes" means a step above
+      # wrote into a file the site ships.
+      - name: The page states a clean commit
+        run: |
+          if grep -q "with local changes" build/site/index.html; then
+            echo "::error::the page says it was built from local changes"
+            exit 1
+          fi
+
+      # Uploaded before the tests run, so what deploys is what was built:
+      # nothing the tests' tools run can change it. A failed test still
+      # fails this job, and the deploy job needs it.
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: build/site
+
       # A skip here is a failure: each of these skips by name when node,
       # Chromium, a core or the build is missing, and every one of them is
       # installed above, so a skip means a step above did not do its job.
@@ -109,10 +131,6 @@ jobs:
             echo "::error::a site test skipped; see the reasons above"
             exit 1
           fi
-
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: build/site
 
   deploy:
     needs: build

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from tools import board_sources, site_licences
+from tools import board_sources, build_site, site_licences
 
 KICAD = site_licences.KICAD_PACKAGES3D
 UNO = {"file": "/models/Arduino-Uno.glb", "source": "Arduino's own EAGLE board file"}
@@ -110,6 +110,47 @@ def test_the_model_notice_names_the_licence_the_board_and_the_mit_text_whole():
     assert "https://github.com/adafruit/Adafruit-KB2040-PCB.git" in notice
     assert "CC BY-SA 3.0 Unported" in notice
     assert mit in notice
+
+
+def test_a_shipped_board_drawing_an_mit_part_without_its_notice_is_refused():
+    """What a model draws is cited in its own entry; a SparkFun board that
+    took an Adafruit part would otherwise ship without Adafruit's notice."""
+    thing_plus = {"file": "/models/SparkFun-Thing-Plus-ESP32-C6.glb",
+                  "components": "KiCad kicad-packages3D; and 'USB_C' out of "
+                                "https://raw.githubusercontent.com/adafruit/"
+                                "Adafruit_CAD_Parts/c128bce/x.step, MIT"}
+    with pytest.raises(site_licences.NotShippable, match="Adafruit_CAD_Parts"):
+        site_licences.select(index({"SparkFun Thing Plus ESP32-C6": thing_plus}),
+                             ["SparkFun-Thing-Plus-ESP32-C6.glb"])
+
+
+def test_an_mit_board_file_whose_row_does_not_name_its_text_is_refused():
+    with pytest.raises(site_licences.NotShippable, match="board file is MIT"):
+        site_licences.board_licence(site_licences.Ships("pcbcupid-glyph-mini-2040"))
+
+
+def test_an_mit_board_file_whose_text_is_pinned_nowhere_is_refused():
+    with pytest.raises(site_licences.NotShippable, match="OSHW-XIAO-Series"):
+        site_licences.board_licence(site_licences.Ships("seeed-xiao"))
+
+
+def test_an_mit_board_file_whose_row_names_its_pinned_text_ships():
+    row = site_licences.Ships("pcbcupid-glyph-mini-2040", ("PCBCUPID glyph-mini-2040",))
+    assert site_licences.board_licence(row).name == "MIT"
+
+
+def test_the_runtime_notice_says_where_the_shipped_pyodides_source_is():
+    """At the release tools/build_site.py pins, so a bump moves both."""
+    release = build_site.PYODIDE.url.split("/download/")[1].split("/")[0]
+    titles = [*site_licences.RUNTIME_TEXTS, *site_licences.EMSCRIPTEN_TEXTS]
+    notice = site_licences.runtime_notice({title: "text" for title in titles})
+    assert f"https://github.com/pyodide/pyodide/tree/{release}" in notice
+
+
+def test_the_runtime_notice_points_to_the_models_notice():
+    titles = [*site_licences.RUNTIME_TEXTS, *site_licences.EMSCRIPTEN_TEXTS]
+    notice = site_licences.runtime_notice({title: "text" for title in titles})
+    assert "models/NOTICE.txt" in notice
 
 
 def test_the_runtime_notice_carries_every_licence_text_whole():

@@ -24,6 +24,7 @@ import functools
 import http.server
 import pathlib
 import threading
+import tomllib
 
 import pytest
 
@@ -168,6 +169,13 @@ def test_every_file_the_page_asks_the_site_for_is_there(tab):
         "document.getElementById('counter').textContent === '0 steps'")
     assert any(url.endswith("/models/index.json") for url in tab.asked)
     assert tab.refused == []
+
+
+def test_the_notice_names_the_release_pyproject_toml_states(tab):
+    stated = tomllib.loads((REPO / "pyproject.toml").read_text(
+        encoding="utf-8"))["project"]["version"]
+    assert (f"This is OpenHardware {stated}, built from "
+            in tab.text_content("#inpage-release"))
 
 
 def test_the_notice_links_the_licences_the_site_is_under(tab):

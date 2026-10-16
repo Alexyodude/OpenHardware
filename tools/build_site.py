@@ -55,6 +55,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import tomllib
 import typing
 import urllib.request
 import zipfile
@@ -68,6 +69,7 @@ STATIC = REPO / "webui" / "static"
 SITE = REPO / "build" / "site"
 LOCK = REPO / "build" / "site.lock"
 CACHE = REPO / "third_party" / "site-cache"
+PYPROJECT = REPO / "pyproject.toml"
 
 
 class Pinned(typing.NamedTuple):
@@ -271,8 +273,12 @@ def wasm_cores(out: pathlib.Path) -> list[pathlib.Path]:
     built = []
     for core in build_core.cores():
         target = out / f"lib{core}.so"
+        # The prefix map keeps the machine's own path out of the module:
+        # `assert` compiles `__FILE__` in, and a build on the owner's machine
+        # carried C:\Users\<name>\... in a file the site publishes.
         done = subprocess.run(
-            [*command, *SIDE_MODULE_FLAGS, f"-I{build_core.CORE_DIR / core}",
+            [*command, *SIDE_MODULE_FLAGS, f"-ffile-prefix-map={REPO}=.",
+             f"-I{build_core.CORE_DIR / core}",
              *map(str, core_sources(core)), "-o", str(target)],
             capture_output=True, text=True, check=False)
         if done.returncode != 0:
@@ -403,7 +409,8 @@ NOTICE = """<aside class="inpage" aria-label="About this copy">
     pick a board and load the image in the board panel. It cannot compile a
     sketch, which needs a toolchain; for that, run
     <code>python webui/emulator_server.py</code> from a checkout. Whose
-    work is in it, and under what licence: <a href="NOTICE.txt">NOTICE.txt</a>.</p>
+    work is in it, and under what licence: <a href="NOTICE.txt">NOTICE.txt</a>.
+    <span id="inpage-release"></span></p>
 </aside>"""
 
 #: The Build button, disabled in the page itself rather than by a script.
@@ -454,6 +461,69 @@ def page(html: str) -> str:
     for anchor, replacement in ADAPTATIONS:
         html = html.replace(anchor, replacement)
     return html
+
+
+# --- which release this is ----------------------------------------------------
+
+#: Where the notice says which release the page is and what it was built from
+#: (OH-243). `page()` leaves it empty and `stamp()` fills it, so `page()` stays
+#: a function of `emulator.html` alone.
+RELEASE_SLOT = '<span id="inpage-release"></span>'
+
+
+def version(pyproject: pathlib.Path = PYPROJECT) -> str:
+    """`[project] version`: what the page says it is, and what a release tag
+    must name -- `.github/workflows/pages.yml` refuses any other."""
+    try:
+        stated = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise SiteError(f"{pyproject} could not be read: {exc}") from exc
+    found = stated.get("project", {}).get("version")
+    if not isinstance(found, str):
+        raise SiteError(f"{pyproject} states no [project] version as a string; "
+                        f"it has {found!r}")
+    return found
+
+
+def _git(repo: pathlib.Path, *args: str) -> str:
+    try:
+        done = subprocess.run(["git", "-C", str(repo), *args],
+                              capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise SiteError(
+            f"git {args[0]} in {repo} failed: {exc.stderr.strip()}. The page "
+            f"says which commit it was built from, so it is built from a clone "
+            f"of the repository, not from a source archive.") from exc
+    except OSError as exc:
+        raise SiteError(f"git {args[0]} in {repo} did not run: {exc}") from exc
+    return done.stdout.strip()
+
+
+def commit(repo: pathlib.Path = REPO,
+           shipped: typing.Sequence[pathlib.Path] = ()) -> str:
+    """The commit `repo` is at, as 12 hex digits, and "with local changes"
+    after it when a tracked file differs, or when a file the build copies out
+    of `repo` -- `shipped` -- is not tracked at all: either way the site is
+    not that commit's.
+
+    Any other untracked file is not counted. A checkout here usually has
+    another session's new files lying in it, which the site does not ship.
+    """
+    head = _git(repo, "rev-parse", "--short=12", "HEAD")
+    changed = _git(repo, "status", "--porcelain", "--untracked-files=no")
+    names = [path.relative_to(repo).as_posix() for path in shipped]
+    untracked = _git(repo, "ls-files", "--others", "--", *names) if names else ""
+    return f"{head} with local changes" if changed or untracked else head
+
+
+def stamp(html: str, release: str, built_from: str) -> str:
+    """`page()`'s output, its notice naming the release and the commit."""
+    count = html.count(RELEASE_SLOT)
+    if count != 1:
+        raise SiteError(f"the page carries {RELEASE_SLOT!r} {count} times; "
+                        f"stamp() expects it exactly once")
+    return html.replace(RELEASE_SLOT, f'<span id="inpage-release">This is '
+                        f'OpenHardware {release}, built from {built_from}.</span>')
 
 
 # --- what may ship, and the notices -------------------------------------------
@@ -517,7 +587,12 @@ def _write_site(site: pathlib.Path) -> dict[str, int]:
         (site / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, site / name)
     html = (STATIC / "emulator.html").read_text(encoding="utf-8")
-    (site / "index.html").write_text(page(html), encoding="utf-8")
+    shipped = [*(STATIC / name for name in PAGE_FILES), STATIC / "emulator.html",
+               *bundle_files()]
+    release, built_from = version(), commit(REPO, shipped)
+    print(f"  release   OpenHardware {release}, built from {built_from}")
+    (site / "index.html").write_text(stamp(page(html), release, built_from),
+                                     encoding="utf-8")
 
     runtime = pyodide_runtime(site / "pyodide")
     notice = runtime_notice(site)
