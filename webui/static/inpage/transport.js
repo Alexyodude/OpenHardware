@@ -18,7 +18,8 @@
 // JSON the server would have sent. The callers cannot tell, which is the
 // point -- only the transport changed.
 //
-// Everything else goes to the network exactly as asked.
+// A same-origin path outside the folder the site is served from goes to that
+// folder (OH-240, below); everything else goes to the network exactly as asked.
 
 "use strict";
 
@@ -99,6 +100,16 @@
       const body = init.body !== undefined ? String(init.body)
         : request ? await request.text() : "";
       return answerHere(url, verb, body);
+    }
+    // The page's scripts fetch their own files from the server's root --
+    // board3d.js asks for /models/index.json -- which is where the local
+    // server keeps them. This site may be served from a folder instead, as
+    // GitHub Pages serves it at /OpenHardware/, whose root is another site's
+    // (OH-240). So a same-origin path outside the folder is the folder's file.
+    // Served from a root, every path is inside it and nothing moves.
+    if (url.origin === location.origin && !url.pathname.startsWith(site.pathname)) {
+      const moved = new URL(`.${url.pathname}${url.search}`, site);
+      return nativeFetch(request ? new Request(moved, request) : moved, init);
     }
     return nativeFetch(input, init);
   };

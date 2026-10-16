@@ -46,14 +46,17 @@ class _Quiet(http.server.SimpleHTTPRequestHandler):
 
 @pytest.fixture(scope="module")
 def served() -> str:
-    """`build/site/` on a loopback port, as files and nothing else."""
+    """`build/site/` on a loopback port, as files and nothing else, and from
+    a folder -- `/site/` -- as GitHub Pages serves it from /OpenHardware/
+    (OH-240): a file the page asks for from the root is then a request outside
+    the site, which `test_no_request_leaves_the_site` sees."""
     if not (SITE / "index.html").is_file():
         pytest.skip(f"no build at {SITE}: python tools/build_site.py")
-    handler = functools.partial(_Quiet, directory=str(SITE))
+    handler = functools.partial(_Quiet, directory=str(SITE.parent))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    yield f"http://127.0.0.1:{server.server_address[1]}/"
+    yield f"http://127.0.0.1:{server.server_address[1]}/{SITE.name}/"
     server.shutdown()
     server.server_close()
 

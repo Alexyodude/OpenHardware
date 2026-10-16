@@ -359,6 +359,28 @@ TRANSPORT_SCRIPT = '<script src="inpage/transport.js"></script>'
 EMULATOR_STYLE = '<link rel="stylesheet" href="/emulator.css" />'
 INPAGE_STYLE = '<link rel="stylesheet" href="inpage/inpage.css" />'
 
+# emulator.html loads its own files from the server's root, which is where the
+# local server puts them. GitHub Pages serves this site from a folder --
+# alexyodude.com/OpenHardware/, whose root is another site -- so each of
+# those references becomes relative to the page (OH-240). A fetch the page's
+# scripts make from the root, as board3d.js makes for /models/, is moved into
+# the folder by inpage/transport.js instead, since those files are not adapted.
+EMULATOR_SCRIPT_HERE = '<script src="emulator.js"></script>'
+EMULATOR_STYLE_HERE = '<link rel="stylesheet" href="emulator.css" />'
+PANEL_SCRIPT = '<script type="module" src="/board3d-panel.js"></script>'
+PANEL_SCRIPT_HERE = '<script type="module" src="board3d-panel.js"></script>'
+CLOCK_IMPORT = 'import { Clock, TICK_STEPS } from "/clock.js";'
+CLOCK_IMPORT_HERE = 'import { Clock, TICK_STEPS } from "./clock.js";'
+
+#: The import map's entries. Its last line is new: board3d-panel.js imports
+#: "/board3d.js", and an import map remaps a specifier written as a path,
+#: so the one script that names a module from the root needs no edit.
+IMPORT_MAP = ('"three": "/vendor/three.module.js",\n'
+              '    "three/addons/controls/OrbitControls.js": "/vendor/OrbitControls.js"')
+IMPORT_MAP_HERE = ('"three": "./vendor/three.module.js",\n'
+                   '    "three/addons/controls/OrbitControls.js": "./vendor/OrbitControls.js",\n'
+                   '    "/board3d.js": "./board3d.js"')
+
 #: The toolbar. The notice goes above it, so it is the first thing read.
 TOOLBAR = '<div class="bar">'
 
@@ -392,11 +414,14 @@ SKETCH_REPORT_HERE = ('<span class="note" id="sketch-report">Compiling needs the
 #: anchor must be there exactly once: an anchor that moved would otherwise
 #: leave the page silently without the notice, or with a live Build button.
 ADAPTATIONS = (
-    (EMULATOR_STYLE, f"{EMULATOR_STYLE}\n{INPAGE_STYLE}"),
+    (EMULATOR_STYLE, f"{EMULATOR_STYLE_HERE}\n{INPAGE_STYLE}"),
+    (IMPORT_MAP, IMPORT_MAP_HERE),
     (TOOLBAR, f"{NOTICE}\n\n{TOOLBAR}"),
     (BUILD_BUTTON, BUILD_BUTTON_HERE),
     (SKETCH_REPORT, SKETCH_REPORT_HERE),
-    (EMULATOR_SCRIPT, f"{TRANSPORT_SCRIPT}\n{EMULATOR_SCRIPT}"),
+    (EMULATOR_SCRIPT, f"{TRANSPORT_SCRIPT}\n{EMULATOR_SCRIPT_HERE}"),
+    (PANEL_SCRIPT, PANEL_SCRIPT_HERE),
+    (CLOCK_IMPORT, CLOCK_IMPORT_HERE),
 )
 
 

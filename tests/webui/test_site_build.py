@@ -28,9 +28,30 @@ EMULATOR_HTML = (build_site.STATIC / "emulator.html").read_text(encoding="utf-8"
 
 def test_the_transport_is_loaded_immediately_before_emulator_js():
     built = build_site.page(EMULATOR_HTML)
-    assert (f"{build_site.TRANSPORT_SCRIPT}\n{build_site.EMULATOR_SCRIPT}"
+    assert (f"{build_site.TRANSPORT_SCRIPT}\n{build_site.EMULATOR_SCRIPT_HERE}"
             in built)
     assert built.count(build_site.TRANSPORT_SCRIPT) == 1
+
+
+def test_the_built_page_loads_nothing_from_the_servers_root():
+    """Pages serves the site from a folder, whose root is another site."""
+    built = build_site.page(EMULATOR_HTML)
+    assert re.findall(r'(?:src|href)="/[^/"][^"]*"|from "/[^"]*"', built) == []
+
+
+def test_every_module_a_page_script_imports_from_the_root_is_in_the_import_map():
+    """board3d-panel.js imports "/board3d.js" and is not adapted: only the
+    import map moves it into the folder. A new import like it needs a row."""
+    scripts = "".join((build_site.STATIC / name).read_text(encoding="utf-8")
+                      for name in build_site.PAGE_FILES if name.endswith(".js"))
+    named = set(re.findall(r'import\(\s*"(/[^"]+)"\s*\)|from\s+"(/[^"]+)"', scripts))
+    specifiers = {first or second for first, second in named}
+    built = build_site.page(EMULATOR_HTML)
+    mapped = json.loads(re.search(r'<script type="importmap">(.*?)</script>',
+                                  built, re.S).group(1))["imports"]
+    assert specifiers
+    assert {name: mapped.get(name) for name in specifiers} == {
+        name: f".{name}" for name in specifiers}
 
 
 def test_the_page_is_otherwise_emulator_html_unchanged():
@@ -62,11 +83,14 @@ def test_the_notice_has_the_element_the_transport_reports_progress_into():
 
 
 def test_every_file_the_adaptations_load_is_shipped():
-    """A relative href or src page() adds is a file the site must carry."""
-    added = re.findall(r'(?:href|src)="([^"/][^"]*)"',
-                       "".join(new for _, new in build_site.ADAPTATIONS))
-    assert sorted(added) == ["inpage/inpage.css", "inpage/transport.js"]
-    assert set(added) <= set(build_site.PAGE_FILES)
+    """A relative href, src, import or import-map target page() writes is a
+    file the site must carry."""
+    written = "".join(new for _, new in build_site.ADAPTATIONS)
+    added = (re.findall(r'(?:href|src)="([^"/][^"]*)"', written)
+             + re.findall(r'"\./([^"]+)"', written))
+    assert {"inpage/inpage.css", "inpage/transport.js", "board3d.js",
+            "vendor/three.module.js", "clock.js"} <= set(added)
+    assert sorted(set(added) - set(build_site.PAGE_FILES)) == []
 
 
 def test_a_page_missing_any_anchor_is_refused_by_name():
