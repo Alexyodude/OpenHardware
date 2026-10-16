@@ -533,14 +533,16 @@ it already requires. Checked 2026-10-16.
 
 ### The compiler the static site redistributes, never tracked (OH-244)
 
-`tools/build_compiler.py` writes `build/compiler/`: avr-gcc and binutils
-compiled to WebAssembly, the headers and libraries they read, and the Arduino
-core compiled by them, which the page fetches the first time Build is pressed
-and compiles sketches with in the tab. Publishing it is distribution, of GPL
-and LGPL code. **None of it is in this tree**: `build/` is gitignored, and
-every input is fetched pinned by size and sha256 (`AVR_SOURCES`,
-`AVR_RELEASE`, `AVR_CORE`, `AVR_LIBC` and `TOOLCHAIN_AVR` in that file).
-Checked 2026-10-16.
+`tools/build_compiler.py` writes `build/compiler/`: avr-gcc and
+arm-none-eabi GCC, with their binutils, compiled to WebAssembly; the headers
+and libraries they read; and the Arduino AVR and SAMD cores compiled by them.
+The page fetches one chip's share the first time Build is pressed for a board
+with that chip, and compiles sketches with it in the tab. Publishing it is
+distribution, of GPL and LGPL code. **None of it is in this tree**: `build/`
+is gitignored, and every input is fetched pinned by size and sha256
+(`AVR_SOURCES`, `AVR_RELEASE`, `AVR_CORE`, `AVR_LIBC`, `TOOLCHAIN_AVR`,
+`ARM_SOURCES`, `XPACK_RELEASE`, `XPACK_SCRIPTS`, `NEWLIB`, `SAMD_CORE`,
+`CMSIS`, `CMSIS_ATMEL` and `SEEED_SAMD` in that file). Checked 2026-10-16.
 
 **Where it is published:** wherever `build/site/` is. `tools/build_site.py`
 builds the bundle, with its `source/`, and copies it into the site as
@@ -561,12 +563,41 @@ What it carries, and under what:
 | `avr/fs/opt/avr/avr/` | avr-libc 2.0.0's headers, start file and libraries | modified BSD |
 | `avr/fs/opt/avr/avr/lib/ldscripts/avr5.xn` | binutils' linker script | the FSF's all-permissive notice |
 | `avr/fs/arduino-avr/`, `avr/fs/objects/` | the Arduino AVR core 1.8.8's headers, and its sources compiled | LGPL-2.1-or-later, with the exceptions below |
+| `arm/tools/cc1plus.*` | GCC 12.3.1's C++ compiler, from Arm's 12.3.Rel1 source, with GCC's own fix for PR 111632 in `system.h` | GPL-3.0-or-later |
+| the same | MPFR 3.1.6 and MPC 1.0.3, linked into it; GMP 6.2.1, linked into it | LGPL-3.0-or-later; LGPL-3.0-or-later or GPL-2.0-or-later |
+| the same | GCC 12's libbacktrace, linked into it | BSD-3-Clause |
+| `arm/tools/arm-none-eabi-{as,ld,objcopy}.*` | binutils 2.40, from Arm's 12.3.Rel1 source | GPL-3.0-or-later |
+| `arm/fs/opt/arm/lib/gcc/`, libstdc++'s headers and `libstdc++_nano.a` | GCC 12.3.1's headers, start files, `libgcc.a` and libstdc++, for the Cortex-M0+, from xPack's 12.3.1-1.2 release | GPL-3.0-or-later WITH GCC-exception-3.1 |
+| `arm/fs/opt/arm/arm-none-eabi/`, the rest | newlib and newlib-nano's headers, `crt0.o`, `libc_nano.a`, `libm.a` and `libnosys.a`, from the same release | newlib's BSD-style and similar notices, file by file |
+| `arm/fs/framework-arduino-samd/`, `arm/fs/seeed-samd/`, `arm/fs/objects/` | the Arduino SAMD core 1.8.14's headers, SPI and Wire; Seeed's XIAO variant from its SAMD core 1.8.6; their sources compiled | LGPL-2.1-or-later, with the exceptions below |
+| `arm/fs/framework-cmsis/` | Arm's CMSIS 6.3.0 core headers | Apache-2.0 |
+| `arm/fs/framework-cmsis-atmel/` | the ATSAMD21G18A's device headers, as PlatformIO's framework-cmsis-atmel 1.2.2 carries them | Atmel's own licence, below |
 
-The core is not uniformly LGPL, and the exceptions were read out of each file
-the bundle carries: the SPI library is offered under "either the GNU General
+Neither core is uniformly LGPL, and the exceptions were read out of each file
+the bundle carries. In the AVR core, the SPI library is offered under "either the GNU General
 Public License version 2 or the GNU Lesser General Public License version
 2.1", with no later version; `USBCore.h` and `USBDesc.h` carry Peter Barrett's
-ISC-style permission; `Udp.h` is MIT; `new.h` states nothing.
+ISC-style permission; `Udp.h` is MIT; `new.h` states nothing. The SAMD
+core is LGPL throughout but for `Udp.h`, `api/Udp.h` and
+`api/deprecated-avr-comp/avr/pgmspace.h`, which carry MIT-style permissions,
+and seven files that state nothing (`api/Common.cpp`, `api/Common.h`,
+`api/Compat.h`, `api/Interrupts.h`, `compact/dtostrf.c`, `sync.h`,
+`USB/CDC.h`); no file in it is offered under the GPL. Seeed's variant is LGPL.
+
+**Atmel's device headers carry a field-of-use condition, and it is the one
+judgement call here.** The licence every header under `samd21/` carries has
+a fourth clause saying the software "may only be redistributed and used in
+connection with an Atmel microcontroller product". That is not an open-source licence. They are shipped anyway, on
+the reading that a compiler which builds programs for the ATSAMD21G18A a XIAO
+SAMD21 carries is used in connection with that product; PlatformIO, whose
+package these are, and Arduino each redistribute Atmel's device headers in
+what their SAMD builds install. The licence is
+written out whole as `licenses/atmel-cmsis-LICENSE.txt` and stays in each
+header. `samd.h`, the one header outside `samd21/`, carries another, the SAM
+Software Package License, which has one condition and no such clause; it is
+`licenses/atmel-samd-LICENSE.txt`. If the owner reads the clause otherwise,
+the SAMD21 comes out of the bundle and its boards say to build locally, as a
+board whose compiler the bundle does not carry does.
 
 How each licence's conditions are met:
 
@@ -576,13 +607,27 @@ How each licence's conditions are met:
   `toolchain-avr` at 368b87a, the scripts that built the release's
   `libgcc.a`, with that release itself; and `source/openhardware/`, the
   scripts that control this compilation: the Dockerfile, which pins its
-  emsdk image by digest, `build-avr.sh`, `drive.mjs`, `build_compiler.py`,
-  `build.js` and `worker.js`. Emscripten is a generally available program
+  emsdk image by digest, `build-avr.sh`, `build-arm.sh`, `drive.mjs`,
+  `build_compiler.py`, `build.js` and `worker.js`. For the SAMD21: Arm's
+  12.3.Rel1 GCC and binutils archives, with GCC's 12-branch `system.h` that
+  `build-arm.sh` puts in place of 12.3's -- it differs by the fix for PR 111632
+  alone, which the script checks -- and xPack's build scripts at 2fcd97d with
+  the xbb-helper 2.0.1 they call, which holds the configure and make calls and
+  the patch xPack applies to GCC, and which together made the `libgcc.a`,
+  libstdc++ and newlib the bundle carries. (Their `package.json` asks for
+  `^2.0.1`; 2.0.1 was the only such version on the day the release was
+  built.) xPack's release
+  itself is not copied: it is 261 MB, nearly all executables the bundle does
+  not run, and is named, with its address, in `NOTICE.txt`. Emscripten is a generally available program
   used unmodified, which §1 leaves out of the Corresponding Source. The page
-  never fetches `source/`: it is 149 MB, and is there for whoever wants it.
-- **LGPL**, for GMP, MPFR and MPC linked into `cc1plus`, and for the core:
-  their source is in `source/` with the rest, and `licenses/` carries LGPL-2.1
-  and LGPL-3.0 whole.
+  never fetches `source/`: it is 306 MB, and is there for whoever wants it.
+- **LGPL**, for GMP, MPFR and MPC linked into each `cc1plus`, and for the
+  cores: their source is in `source/` with the rest, and `licenses/` carries
+  LGPL-2.1 and LGPL-3.0 whole.
+- **Apache-2.0**, for CMSIS: `licenses/Apache-2.0.txt` is the pack's own
+  `LICENSE`; the pack has no `NOTICE` file, and its headers are unmodified.
+- **newlib's notices** travel as `licenses/newlib-COPYING.NEWLIB.txt` and
+  `licenses/newlib-COPYING.LIBGLOSS.txt`, from Arm's newlib archive.
 - **The notice licences**, BSD, MIT, ISC-style and the FSF's: avr-libc's
   `LICENSE`, libbacktrace's, Emscripten's, musl's `COPYRIGHT` and LLVM's
   texts are in `licenses/`; Barrett's, `Udp.h`'s and the linker script's
@@ -598,10 +643,11 @@ How each licence's conditions are met:
 - `compiler/NOTICE.txt` says all of this in plain text for whoever opens the
   folder, file by file.
 
-**A sketch's image** links the core, avr-libc and `libgcc`. It is built in the
-user's tab and never leaves it. `libgcc`'s exception puts no condition on it;
-the core's LGPL does if the user distributes the image, and the notice says
-so.
+**A sketch's image** links the core, avr-libc and `libgcc` on the Uno; the
+SAMD core, Seeed's variant, newlib-nano, `libgcc` and libstdc++ on the XIAO
+SAMD21. It is built in the user's tab and never leaves it. The runtime
+exception puts no condition on it, nor do newlib's notices; the cores' LGPL
+does if the user distributes the image, and the notice says so.
 
 **`@horang-corp/avr-gcc-wasm` was looked at and not used**: its own code
 states no licence, it ships no build scripts for its WebAssembly (its notices

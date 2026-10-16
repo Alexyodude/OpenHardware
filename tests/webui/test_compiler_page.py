@@ -45,8 +45,10 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 SITE = REPO / "build" / "site"
 
 BOARD = "Arduino Uno"
-#: A board the server builds and this copy does not: its compiler is SAMD21's.
-OTHER_BOARD = "XIAO-SAMD21-DIP"
+#: The copy's second chip, whose compiler is arm-none-eabi GCC's.
+SAMD_BOARD = "XIAO-SAMD21-DIP"
+#: A board the server builds and this copy does not: an ESP32-C3's.
+OTHER_BOARD = "XIAO-ESP32-C3-DIP"
 
 #: Long, because the first request waits for Pyodide to boot and the cores to
 #: compile, as tests/webui/test_site_browser.py's BOOT_MS says.
@@ -267,6 +269,78 @@ def test_no_request_leaves_the_site(session, served):
             if not url.startswith((served, f"blob:{origin}/"))] == []
 
 
+# --- the XIAO SAMD21 ------------------------------------------------------------
+
+#: D0, a header pad, because the XIAO's LED is on PA17, which no pad carries
+#: and so `/api/board/state` does not report. delay(5) is 240,000 of the
+#: SAMD21's instructions, so RUN_STEPS at a time sees both levels.
+SAMD_SKETCH = """void setup() { pinMode(0, OUTPUT); }
+void loop() {
+  digitalWrite(0, HIGH);
+  delay(5);
+  digitalWrite(0, LOW);
+  delay(5);
+}
+"""
+
+#: D0's level after each of twenty runs of RUN_STEPS.
+D0_LEVELS = f"""async () => {{
+  const seen = [];
+  for (let i = 0; i < 20; i++) {{
+    await fetch('/api/board/run', {{method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{steps: {RUN_STEPS}}})}});
+    seen.push((await (await fetch('/api/board/state')).json()).pins['D0']);
+  }}
+  return seen;
+}}"""
+
+
+@pytest.fixture(scope="module")
+def xiao(browser, served) -> dict[str, object]:
+    """One visit that builds SAMD_SKETCH for the XIAO SAMD21 in a context of
+    its own: what it asked for, what the page said, and what D0 did."""
+    context = browser.new_context(viewport={"width": 1400, "height": 1000})
+    asked: list[str] = []
+    context.on("request", lambda request: asked.append(request.url))
+    page = context.new_page()
+    page.goto(served)
+    page.wait_for_function(READY, timeout=BOOT_MS)
+    _pick(page, SAMD_BOARD)
+    seen: dict[str, object] = {"ready_report": page.text_content("#sketch-report")}
+    _build(page, SAMD_SKETCH, ENDED)
+    seen["built_report"] = page.text_content("#sketch-report")
+    seen["d0"] = page.evaluate(D0_LEVELS)
+    seen["asked"] = asked
+    context.close()
+    return seen
+
+
+def test_the_xiao_samd21_says_it_builds_in_this_tab(xiao):
+    assert xiao["ready_report"] == "Builds in this tab. The first build fetches the compiler, once."
+
+
+def test_a_sketch_builds_and_loads_on_the_xiao_samd21_in_the_tab(xiao):
+    assert "bytes on" in xiao["built_report"], xiao["built_report"]
+
+
+def test_the_sketch_built_in_the_tab_drives_d0_both_ways_on_the_xiao_samd21(xiao):
+    assert {"high", "low"} <= set(xiao["d0"]), xiao["d0"]
+
+
+def test_the_xiao_samd21_fetches_its_own_chips_compiler_and_not_the_unos(xiao, served):
+    compiler = f"{served}compiler/"
+    fetched = {url[len(compiler):].split("/")[0] for url in xiao["asked"]
+               if url.startswith(compiler)}
+    assert ("arm" in fetched, "avr" in fetched) == (True, False), sorted(fetched)
+
+
+def test_no_request_the_xiao_samd21_build_makes_leaves_the_site(xiao, served):
+    origin = served.split(f"/{SITE.name}/")[0]
+    assert [url for url in xiao["asked"]
+            if not url.startswith((served, f"blob:{origin}/"))] == []
+
+
 # --- what the Worker does when something is wrong -----------------------------
 #
 # Each in a context of its own, so its Cache Storage starts empty, and with
@@ -379,7 +453,9 @@ def test_a_plan_of_another_format_is_refused_before_its_shape_is_read(fresh, ser
     # A new format is a new shape: here, one with no `chips` at all.
     _serve_plan(fresh, lambda plan: (plan.update(format=99), plan.pop("chips")))
     _open(fresh, served)
-    assert "plan.json is format 99 and this build.js reads format 1" in _press(
+    # The format this site's build.js reads is the one its manifest was written in.
+    reads = _manifest()["format"]
+    assert f"plan.json is format 99 and this build.js reads format {reads}" in _press(
         fresh, "document.getElementById('sketch-report').textContent.includes('format 99')")
 
 
@@ -389,7 +465,8 @@ def test_a_manifest_of_another_format_is_refused_before_its_shape_is_read(fresh,
     fresh.context.route("**/compiler/manifest.json", lambda route: route.fulfill(
         body=json.dumps(manifest), content_type="application/json"))
     _open(fresh, served)
-    assert "manifest.json is format 99 and this build.js reads format 1" in _press(
+    reads = _manifest()["format"]
+    assert f"manifest.json is format 99 and this build.js reads format {reads}" in _press(
         fresh, "document.getElementById('sketch-report').textContent.includes('format 99')")
 
 

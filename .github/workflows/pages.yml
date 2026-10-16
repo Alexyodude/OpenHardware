@@ -46,12 +46,14 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    # The site build compiles GCC to WebAssembly in Docker from nothing on
-    # every run (tools/build_compiler.py): 616 s for the AVR toolchain and
-    # its bundle from a new Docker volume on an eight-thread desktop
-    # (docs/research/web-compile/README.md). A runner has fewer cores, and
-    # no run of this workflow has measured it yet.
-    timeout-minutes: 90
+    # The site build compiles two GCCs to WebAssembly in Docker from nothing
+    # on every run (tools/build_compiler.py): on an eight-thread desktop,
+    # from new Docker volumes, 616 s for the AVR toolchain with its bundle
+    # and 11 min for the Arm one (docs/research/web-compile/README.md), and
+    # it fetches about 380 MB of pinned sources and releases. A hosted runner
+    # has four cores, so twice that is the guess; no run of this workflow has
+    # measured it yet, and nothing is cached between runs.
+    timeout-minutes: 150
     steps:
       # Nothing later pushes, so the token is not left in .git/config
       # for the steps after this one to find.

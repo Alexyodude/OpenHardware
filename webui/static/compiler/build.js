@@ -40,7 +40,7 @@
 export class Refused extends Error {}
 
 /** The plan.json and manifest.json this reads; tools/build_compiler.py's PLAN_FORMAT. */
-export const PLAN_FORMAT = 1;
+export const PLAN_FORMAT = 2;
 
 /**
  * Throws unless `format` is PLAN_FORMAT. Asked of manifest.json and plan.json
@@ -196,8 +196,10 @@ export async function build({ plan, board, source, files, tools, step = () => {}
   // The sketch, as compile.build writes it: `sketch.cpp`, its preamble
   // added, outside the working directory (build_compiler.SKETCH says why).
   const sketch = new TextEncoder().encode(preamble(source, plan.preamble));
-  const cc1plusArgv = recipe.cc1plus.flatMap((arg) =>
+  // cc1plus's, and as's where the driver hands as the -I directories too.
+  const withLibraries = (argv) => argv.flatMap((arg) =>
     arg === "@LIBRARY_INCLUDES@" ? wanted.flatMap((library) => ["-I", library.include]) : [arg]);
+  const cc1plusArgv = withLibraries(recipe.cc1plus);
   step(recipe.tools.cc1plus.name);
   const compiled = await run(tools.cc1plus, cc1plusArgv, [
     ...await loaded(recipe.headers),
@@ -208,18 +210,21 @@ export async function build({ plan, board, source, files, tools, step = () => {}
              command: shown(recipe.tools.cc1plus.name, cc1plusArgv) };
   }
 
+  const asArgv = withLibraries(recipe.as);
   step(recipe.tools.as.name);
-  const assembled = await run(tools.as, recipe.as, [
+  const assembled = await run(tools.as, asArgv, [
     [`${BUILD_DIR}/sketch.s`, compiled.fs.readFile(`${BUILD_DIR}/sketch.s`)],
   ]);
   if (assembled.status !== 0) {
     return { ok: false, image: new Uint8Array(), diagnostics: hinted(said(assembled, recipe), recipe),
-             command: shown(recipe.tools.as.name, recipe.as) };
+             command: shown(recipe.tools.as.name, asArgv) };
   }
 
-  // compile.build's link order: the sketch, the core, then each wanted
-  // library's sources in the recipe's order.
-  const objects = [...recipe.objects, ...wanted.flatMap((library) => library.objects)];
+  // compile.build's link order: the sketch, the core, each wanted library's
+  // sources in the recipe's order, then a variant from outside the framework
+  // (the SAMD21's variant.cpp; none on the Uno).
+  const objects = [...recipe.objects, ...wanted.flatMap((library) => library.objects),
+                   ...recipe.trailing];
   const ldArgv = recipe.ld.flatMap((arg) =>
     arg === "@OBJECTS@" ? [`${BUILD_DIR}/00.o`, ...objects] : [arg]);
   step(recipe.tools.ld.name);

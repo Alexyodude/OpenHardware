@@ -233,11 +233,19 @@ Review     the first review's findings, fixed: a failed instantiation could hang
            keep. Found beside it: a page served over plain http from another machine has no
            crypto.subtle, so every build failed on a TypeError; Build is now off there and
            says why
-Source     source/ is 149 MB, not ~110
+SAMD21     PLAN_FORMAT 2: a chip's plan gains `trailing`, objects linked after the wanted
+           libraries (variant.cpp, from outside the framework, as compile.build orders it),
+           and its link a -T script. One image builds every toolchain, each by its own
+           script (build-avr.sh, build-arm.sh). A toolchain's key is the Dockerfile, its own
+           script and its sources, so the Dockerfile change rebuilt both, and the AVR
+           tools came out the same bytes; a change to one script rebuilds that toolchain. GCC 12.3 needed GCC's own fix for PR 111632 to
+           compile against libc++: its 12 branch's system.h, pinned, put in place by
+           build-arm.sh over the 12.3 file it was measured to differ from by that alone
+Source     source/ is 149 MB for the Uno, not ~110; 306 MB with the SAMD21
 Measured   docs/research/web-compile/README.md: sizes, first-build times, the SAMD21, RP2040
            and ESP32 answers
-Slices     1-4 done for the Uno. 5: the SAMD21 not yet built; RP2040 has no server recipe to
-           match; the ESP32s' framework is the repository's own 128 KB core, so they need only
+Slices     1-4 done for the Uno. 5: the SAMD21 built the same way and the same bytes;
+           RP2040 has no server recipe to match; the ESP32s' framework is the repository's own 128 KB core, so they need only
            a riscv32 GCC and fit. 6 done once OH-243 handed build_site.py over (3ea2e1f); the
            Pages workflow's timeout is 90 minutes for the compiler's Docker build, which no
            run of the workflow has measured yet

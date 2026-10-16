@@ -49,15 +49,34 @@ compiler into `build/site/compiler/` itself, and the post-step and
 `build/site-with-compiler/` are gone. A board the copy has no compiler for
 has Build off and says to use the local server.
 
+## Progress, 2026-10-17
+
+The XIAO SAMD21 builds in the tab too. arm-none-eabi GCC 12.3.1 and
+binutils 2.40 are compiled to WebAssembly from the Arm sources xPack builds
+from, in the same Docker image as the AVR's (whose tools rebuilt there to the
+same bytes), and `libgcc.a`, libstdc++ and newlib are xPack's own, because the
+server's toolchain is xPack's build and Arm's Cortex-M0+ libraries differ from
+it in bytes. GCC 12.3 does not compile against Emscripten's libc++ (PR
+111632); `build-arm.sh` swaps in the 12 branch's fixed `system.h`, after
+checking the file it replaces. Five samples are the server's bytes, a
+syntax error's and a header note's words are the server's, and a link error is
+too but for three spellings the test names. One difference is known and is
+the server's: a sketch that builds an SPI bus of its own links SPI.cpp's
+assert, whose `__FILE__` on the server is its own install path, so no other
+build can match it; the test holds it by name, and OH-247 is the fix. In
+the page, a sketch built in the tab drives D0 both ways, the XIAO fetches the
+ARM share and none of the AVR's, and nothing leaves the site. A XIAO's first
+Build fetches 60.2 MB in 1,176 files, 13.6 MB gzipped, and took 30.6 s on a
+quiet machine. PROVENANCE.md records the ARM licences, and one judgement for
+the owner: Atmel's device headers "may only be redistributed and used in
+connection with an Atmel microcontroller product".
+
 Left, in order:
 
-- The SAMD21, the same way: arm-none-eabi GCC 12.3.1 to WebAssembly. The
-  server's is xPack's build of it, not Arm's binaries, whose Cortex-M0+
-  libraries differ in bytes; so xPack's is the one to match.
 - The ESP32s turned out to need no framework worth the name -- the
   repository's own 128 KB core, bare metal -- so they fit, and need only a
   riscv32-esp GCC 8.4.0 built the same way. They say to build locally until
   then.
 - The RP2040 has no server recipe, so there is nothing to match.
 - PROVENANCE.md goes back to OH-163's touches once this ticket's last licence
-  record is in, the SAMD21's.
+  record is in, the ESP32s'.

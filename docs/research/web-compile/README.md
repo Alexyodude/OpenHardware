@@ -59,7 +59,7 @@ Blink, delay(500)    PB5 changes every  8,000,000 instructions  (500 ms of 16 MH
 Blink, delay(250)    PB5 changes every  4,000,000 instructions  (250 ms)
 int x = ;  line 2    sketch.cpp:2:23: error: expected primary-expression before ';' token
                      the line quoted under it; the board's state unchanged
-XIAO-SAMD21-DIP      Build disabled; "Build it with the local server: python
+XIAO-ESP32-C3-DIP    Build disabled; "Build it with the local server: python
                      webui/emulator_server.py from a checkout."
 requests             the site's own files, and blob: URLs of its own origin; nothing else
 ```
@@ -103,7 +103,7 @@ gave the same bytes for every tool.
 `PROVENANCE.md` §4 gives: no licence on its own code, no build scripts for its
 WebAssembly, and binutils 2.42 against the server's 2.26.
 
-## The SAMD21: next, the same way
+## The SAMD21: built, and the same bytes as the server
 
 The server builds it with PlatformIO's `toolchain-gccarmnoneeabi` 1.120301.0
 and `framework-arduino-samd` 1.8.14. That toolchain is **xPack's** build of
@@ -111,11 +111,83 @@ GCC 12.3.1 (20230626), as its README and `gcc -v` say, and not Arm's own
 12.3.Rel1 binaries: of the Cortex-M0+ files a link reads, Arm's Windows
 release has `libc.a`, `libm.a`, `libnosys.a`, `crt0.o`, `crtbegin.o` and
 `libgcc.a` different in bytes from PlatformIO's (measured 2026-10-16), so it
-is xPack's that a browser build has to match.
-Its native `cc1plus` is 26.5 MB against the AVR's 13.3 MB, whose WebAssembly
-build is 11.2 MB; at the same ratio the SAMD21's would be about 22 MB, before
-newlib-nano, libstdc++ and CMSIS. Not built in this change. Its boards say to
-build them with the local server until it is.
+is xPack's that a browser build has to match. So `build-arm.sh` compiles GCC
+12.3.1 and binutils 2.40 from the Arm archives xPack builds from, with xPack's
+configure arguments, and the bundle takes `libgcc.a`, libstdc++ and newlib
+from xPack's own release.
+
+**GCC 12.3 does not compile against libc++ as released**: its `system.h`
+includes `safe-ctype.h`, whose poisoned `toupper` and friends are macros,
+before `<map>`, and libc++'s `<locale>` -- Emscripten's -- then fails. That is
+GCC's PR 111632, fixed on its 12 branch in a995fded (in 12.4) by including the
+C++ headers first. `build-arm.sh` puts that commit's `system.h` in place of
+12.3's, after checking 12.3's is the file the fix was measured against: the
+two differ by exactly the fix's 39 lines. The fix moves includes, not code.
+
+Measured 2026-10-16, on an eight-thread desktop:
+
+```text
+toolchain from a new Docker volume   11 min (the AVR's 616 s includes its bundle)
+cc1plus.wasm                         20.7 MB   (the AVR's 11.2 MB)
+what a XIAO's first Build fetches    60.2 MB in 1,176 files; 13.6 MB gzipped
+  of which                           24.5 MB the four tools
+                                     10.4 MB xPack's libgcc.a, debug sections and all
+                                      3.4 MB libstdc++_nano.a
+                                      the rest headers: GCC's, newlib's, CMSIS's, Atmel's
+source/, both chips                  306 MB
+```
+
+`libgcc.a` and the headers are the vendor's files byte for byte, which is what
+makes the image the server's; fetching fewer headers is possible -- a build
+reads a fraction of them -- and is not done here.
+
+**A XIAO's first Build**, Blink, from the press to the report, in headless
+Chromium given the GPU, against `build/site` served as files on this machine.
+The machine was shared with other work, and the figures move with its load
+far more than with anything in the page, so the Uno's from the same runs are
+beside them:
+
+```text
+                       XIAO SAMD21              Uno
+quiet                  30.6 s, then 9.2 s       3.1 s, then 2.6 s
+CPU busy 60-91%        33.7 / 141.7 / 232.4 s   6.6 / 31.6 / 88.3 s
+  a second build       3.1-5.3 s                2.8-5.1 s
+```
+
+Which share of a first build is the fetch, which is compiling the 20.7 MB
+`cc1plus.wasm`, and which is the 1,176 requests rather than their bytes was
+not separated. Over a network, 13.6 MB gzipped is about 2.2 s at 50 Mbit/s,
+and 60.2 MB is 9.6 s where the host does not compress.
+
+**The same bytes as the server** (`tests/webui/test_compile_wasm.py`): Blink at
+500 and 250, OH-135's idioms with Wire and SPI, Serial1 with String, placement
+new and float printing, and soft float with `sinf`. A syntax error's words,
+and a note pointing into the core's header, are the server's. A link error's
+are too, but for three spellings of one toolchain that the test names:
+binutils 2.40 opens each line with the path ld ran as, which differs; the
+server's Windows ld lowercases its paths, so `compile.py`'s `<toolchain>`
+label misses them; and the server's driver reached its libraries through
+`bin/../lib`. A sketch printing to `Serial` does not compile on either side:
+on a XIAO it is USB CDC, which the server's recipe leaves out on purpose.
+
+**One known difference, and it is the server's.** SPI.cpp's `SPIClassSAMD`
+constructor asserts, so `__FILE__` -- the path the file was compiled at -- is
+in any image that links it. The global `SPI` inlines it and so links nothing;
+a sketch that builds a second bus does. The server's path is PlatformIO's
+install directory under the user's home, so its image differs from machine to
+machine and carries the user's name, and no other build can match it. The
+test holds the difference by name. OH-247 is the fix, one prefix map on both
+sides, and waits on `webui/compile.py`, which another ticket holds.
+
+**Measured on Windows only.** Every same-bytes test ran against PlatformIO's
+win32-x64 packages, the ones xPack's win32-x64 release matches byte for byte.
+On Linux PlatformIO installs xPack's linux-x64 build, whose archives are
+stripped differently; an image is the same bytes if the stripping touched
+only debug sections, and nothing here has checked. CI runs no same-bytes
+test: it has no PlatformIO.
+
+Rebuilding the AVR tools in the image that now builds both gave the same
+bytes for every one.
 
 ## The RP2040: nothing to match
 
