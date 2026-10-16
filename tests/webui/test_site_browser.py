@@ -130,12 +130,18 @@ def test_an_uploaded_uno_image_blinks_pin_13(tab):
     """Read through the page's own fetch, so through the transport: PB5 is
     seen both high and low while the page's Run clock drives the board. A
     read before the sketch's pinMode sees it `input`, which is not a blink
-    and does not end the wait."""
+    and does not end the wait.
+
+    A read lands between two of the clock's ticks of `TICK_STEPS` (200,000)
+    instructions, so PB5 is seen only at those boundaries; replayed through
+    `webui/inpage.py` natively, it is high from the first and low from the
+    sixth. The wait is long because six ticks took more than a minute on a
+    machine busy with other builds, and a slow CI runner is the same case."""
     _load_board(tab, "Arduino Uno", TESTS / "avr" / "blink" / "blink.bin", "0x0")
     tab.click("#board-go")
     seen = tab.evaluate("""async () => {
         const seen = new Set();
-        const until = performance.now() + 60000;
+        const until = performance.now() + 180000;
         while (!(seen.has('high') && seen.has('low')) && performance.now() < until) {
           const pins = await (await fetch('/api/board/pins')).json();
           seen.add(pins.pads.find((pad) => pad.chip_pin === 'PB5').state);
