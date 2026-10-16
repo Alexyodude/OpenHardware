@@ -2,8 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 the OpenHardware authors. See LICENSE.
-"""`build/site-with-compiler/` served as plain files and driven in Chromium,
-per OH-244.
+"""`build/site/` served as plain files and driven in Chromium, per OH-244.
 
 `test_compile_wasm.py` holds the bundle's images to the server's under node.
 This holds what only the page shows: that Build and run, pressed in a tab with
@@ -21,7 +20,7 @@ which is the slow part, so the module drives the page through every step once
 in `session` and each test reads one thing it saw.
 
 It skips -- by name -- without Playwright, without its Chromium, or without the
-site: `python tools/build_site.py`, then `python tools/build_compiler.py --site`.
+site: `python tools/build_site.py`, which builds the compiler into it.
 """
 
 from __future__ import annotations
@@ -43,7 +42,7 @@ from webui.boards.atmega328p import F_CPU_HZ  # noqa: E402
 from webui.compile import MAX_SOURCE_BYTES  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-SITE = REPO / "build" / "site-with-compiler"
+SITE = REPO / "build" / "site"
 
 BOARD = "Arduino Uno"
 #: A board the server builds and this copy does not: its compiler is SAMD21's.
@@ -109,8 +108,7 @@ def served() -> str:
     """The site on a loopback port, as files and nothing else, from a folder
     as GitHub Pages serves it (OH-240)."""
     if not (SITE / "compiler" / "manifest.json").is_file():
-        pytest.skip(f"no site with a compiler at {SITE}: python tools/build_site.py, "
-                    "then python tools/build_compiler.py --site")
+        pytest.skip(f"no site with a compiler at {SITE}: python tools/build_site.py")
     server = _Server(("127.0.0.1", 0), functools.partial(_Quiet, directory=str(SITE.parent)))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -262,7 +260,7 @@ def test_a_board_this_copy_cannot_build_says_so_beside_the_button(session):
 
 
 def test_no_request_leaves_the_site(session, served):
-    origin = served.split("/site-with-compiler/")[0]
+    origin = served.split(f"/{SITE.name}/")[0]
     everything = [url for urls in session["asked"].values() for url in urls]
     assert everything
     assert [url for url in everything

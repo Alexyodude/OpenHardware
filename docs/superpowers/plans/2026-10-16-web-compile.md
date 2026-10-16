@@ -100,7 +100,7 @@ def build(out: pathlib.Path = COMPILER, *, sources: bool = True) -> dict[str, ob
 def fetch_pinned(pin: Pinned) -> pathlib.Path
 def wasm_tools(chip: str) -> pathlib.Path                 # docker, or the cached out/ dir
 def plan(chip: str, recipe: compile.Recipe) -> dict[str, object]   # from webui.compile.RECIPES
-def install_into_site(site: pathlib.Path) -> None         # the post-step, until build_site.py has it
+def install_into_site(site: pathlib.Path) -> None         # the post-step; gone in slice 6 (As built)
 ```
 
 ```js
@@ -187,11 +187,14 @@ Layout     build/compiler/ holds plan.json, manifest.json, boards.json at its ro
            says the same of Pyodide)
            the tool glue is imported through same-origin blob: URLs, after its sha256 is checked,
            on every read and not only the first fetch: Cache Storage is the whole origin's
-Post-step  install_into_site() writes a COPY, build/site-with-compiler/, and not build/site:
-           test_site_browser.py holds build/site to OH-239's page, whose Build says it needs
-           the local server, and both are right until build_site.py takes these lines
+Post-step  install_into_site() wrote a COPY, build/site-with-compiler/, and not build/site,
+           while test_site_browser.py held build/site to OH-239's page, whose Build said it
+           needed the local server. Gone with slice 6: build_site.py's compiler() builds the
+           bundle into build/site/compiler/, one ADAPTATION adds compile.js after the
+           transport, the notice names the compiler's NOTICE.txt, and SKETCH_REPORT_HERE is
+           dropped, since compile.js writes the line once the board list is in
 Signatures build(*, sources=True) writes COMPILER; wasm_tools() takes no chip; chip_plan()
-           replaces plan(); --site takes no path
+           replaces plan()
 Sentinels  @LIBRARY_INCLUDES@ and @OBJECTS@, collapsed from -I/@LIBRARY_INCLUDES@ and
            /build/@OBJECTS@.o, which is how the driver spells what it was handed
 Found      GCC's configure probes the target assembler and linker and changes codegen by the
@@ -235,5 +238,7 @@ Measured   docs/research/web-compile/README.md: sizes, first-build times, the SA
            and ESP32 answers
 Slices     1-4 done for the Uno. 5: the SAMD21 not yet built; RP2040 has no server recipe to
            match; the ESP32s' framework is the repository's own 128 KB core, so they need only
-           a riscv32 GCC and fit. 6 waits on OH-243.
+           a riscv32 GCC and fit. 6 done once OH-243 handed build_site.py over (3ea2e1f); the
+           Pages workflow's timeout is 90 minutes for the compiler's Docker build, which no
+           run of the workflow has measured yet
 ```

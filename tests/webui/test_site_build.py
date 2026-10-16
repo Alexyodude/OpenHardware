@@ -29,10 +29,10 @@ from tools import build_core, build_site
 EMULATOR_HTML = (build_site.STATIC / "emulator.html").read_text(encoding="utf-8")
 
 
-def test_the_transport_is_loaded_immediately_before_emulator_js():
+def test_the_transport_then_the_compiler_are_loaded_immediately_before_emulator_js():
     built = build_site.page(EMULATOR_HTML)
-    assert (f"{build_site.TRANSPORT_SCRIPT}\n{build_site.EMULATOR_SCRIPT_HERE}"
-            in built)
+    assert (f"{build_site.TRANSPORT_SCRIPT}\n{build_site.COMPILE_SCRIPT}\n"
+            f"{build_site.EMULATOR_SCRIPT_HERE}" in built)
     assert built.count(build_site.TRANSPORT_SCRIPT) == 1
 
 
@@ -91,10 +91,12 @@ def test_every_file_the_adaptations_load_is_shipped():
     written = "".join(new for _, new in build_site.ADAPTATIONS)
     added = (re.findall(r'(?:href|src)="([^"/][^"]*)"', written)
              + re.findall(r'"\./([^"]+)"', written))
-    assert {"inpage/inpage.css", "inpage/transport.js", "board3d.js",
-            "vendor/three.module.js", "clock.js", "NOTICE.txt"} <= set(added)
-    # NOTICE.txt is the one the build writes rather than copies.
-    assert sorted(set(added) - {*build_site.PAGE_FILES, "NOTICE.txt"}) == []
+    assert {"inpage/inpage.css", "inpage/transport.js", "inpage/compile.js", "board3d.js",
+            "vendor/three.module.js", "clock.js", "NOTICE.txt",
+            "compiler/NOTICE.txt"} <= set(added)
+    # The two NOTICE.txt files are the ones the build writes rather than copies.
+    assert sorted(set(added) - {*build_site.PAGE_FILES, "NOTICE.txt",
+                                "compiler/NOTICE.txt"}) == []
 
 
 def test_a_page_missing_any_anchor_is_refused_by_name():

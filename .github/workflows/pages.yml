@@ -46,7 +46,12 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # The site build compiles GCC to WebAssembly in Docker from nothing on
+    # every run (tools/build_compiler.py): 616 s for the AVR toolchain and
+    # its bundle from a new Docker volume on an eight-thread desktop
+    # (docs/research/web-compile/README.md). A runner has fewer cores, and
+    # no run of this workflow has measured it yet.
+    timeout-minutes: 90
     steps:
       # Nothing later pushes, so the token is not left in .git/config
       # for the steps after this one to find.
@@ -92,6 +97,10 @@ jobs:
       - name: Build the cores
         run: python tools/build_core.py
 
+      # And the compiler the page builds sketches with (OH-244): GCC built
+      # for WebAssembly in the runner's Docker, from the sources
+      # tools/build_compiler.py pins, and the Arduino core compiled with it
+      # under node.
       - name: Build the site
         run: python tools/build_site.py
 
@@ -126,7 +135,8 @@ jobs:
             tests/webui/test_inpage.py \
             tests/webui/test_site_build.py \
             tests/webui/test_site_pyodide.py \
-            tests/webui/test_site_browser.py | tee site-tests.log
+            tests/webui/test_site_browser.py \
+            tests/webui/test_compiler_page.py | tee site-tests.log
           if grep -q SKIPPED site-tests.log; then
             echo "::error::a site test skipped; see the reasons above"
             exit 1

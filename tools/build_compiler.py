@@ -7,7 +7,9 @@
 fetches when Build is pressed.
 
     python tools/build_compiler.py          # build/compiler/
-    python tools/build_compiler.py --site   # and build/site-with-compiler/: build/site with it in
+
+`tools/build_site.py` runs this and copies the result into the site's
+`compiler/`; running it alone is for working on the compiler.
 
 ## What it is for
 
@@ -42,7 +44,7 @@ The page fetches what `manifest.json` lists for a chip, once, on the first
 Build press, and keeps it in Cache Storage. `source/` -- every source tarball,
 patch and script above, about 150 MB -- is laid down beside it for the GPL's
 sake and is never fetched by the page; `--no-sources` leaves it out of a
-build meant only for testing, which `--site` then refuses to publish.
+build meant only for testing, and `tools/build_site.py` never asks for that.
 
 ## Not here
 
@@ -886,106 +888,19 @@ def build(*, sources: bool = True) -> dict[str, object]:
         return manifest
 
 
-# --- the post-step, until tools/build_site.py does this itself -----------------------
-
-#: How the page loads the compiler: after the transport, which it wraps.
-COMPILE_SCRIPT = '<script src="inpage/compile.js"></script>'
-
-
-#: Where the post-step writes its copy of build/site.
-SITE_WITH_COMPILER = REPO / "build" / "site-with-compiler"
-
-
-def install_into_site() -> pathlib.Path:
-    """A copy of the site tools/build_site.py built, with the bundle and
-    `inpage/compile.js` in it and its index.html adapted to match.
-
-    **A stand-in, and temporary.** tools/build_site.py is OH-238's chain's
-    until OH-243 is done; its owner asked that nothing be added to it until
-    then, and agreed to this over its output in the meantime. When it is
-    handed over, these lines become one PAGE_FILES entry, one ADAPTATION and
-    a call to `build`, and this function goes.
-
-    A COPY, and not build/site itself: tests/webui/test_site_browser.py holds
-    build/site to the page OH-239 shipped, whose Build button says it needs
-    the local server, and both pages are right until build_site.py has these
-    lines.
-    """
-    from tools import build_site  # read for its anchors, never written
-
-    if not (build_site.SITE / "index.html").is_file():
-        raise CompilerError(f"no site at {build_site.SITE}: python tools/build_site.py first")
-    # A site is published, and publishing the compiler is distributing GPL
-    # object code, which must carry its source.
-    if not (COMPILER / "source").is_dir():
-        raise CompilerError(f"{COMPILER} has no source/: it was built with --no-sources, for "
-                            "tests, and may not go into a site. Build it again without.")
-    buildable = json.loads((COMPILER / "boards.json").read_text(encoding="utf-8"))["buildable"]
-    if not buildable:
-        raise CompilerError(f"{COMPILER / 'boards.json'} names no board this bundle builds")
-    site = SITE_WITH_COMPILER.with_name(SITE_WITH_COMPILER.name + ".partial")
-    shutil.rmtree(site, ignore_errors=True)
-    shutil.copytree(build_site.SITE, site)
-    index = site / "index.html"
-    html = index.read_text(encoding="utf-8")
-    adaptations = (
-        (build_site.TRANSPORT_SCRIPT, f"{build_site.TRANSPORT_SCRIPT}\n{COMPILE_SCRIPT}"),
-        # Still disabled in the page: inpage/compile.js enables it for a board
-        # it builds once the picker is filled, which emulator.js does not
-        # reflect (BUILD_BUTTON_HERE's comment). Without the script, it stays off.
-        (build_site.BUILD_BUTTON_HERE,
-         '<button id="sketch-build" class="primary" disabled title="Waiting for the board list">'),
-        (build_site.SKETCH_REPORT_HERE,
-         '<span class="note" id="sketch-report">Builds in this tab. The first '
-         'build fetches the compiler, once.</span>'),
-        ("It cannot compile a\n    sketch, which needs a toolchain; for that, run\n"
-         "    <code>python webui/emulator_server.py</code> from a checkout.",
-         f"It compiles a sketch\n    for the {', '.join(buildable)} in this tab, fetching "
-         "its compiler the first\n    time Build is pressed (<a href=\"compiler/NOTICE.txt\">its "
-         "licences and source</a>);\n    for any other board, run "
-         "<code>python webui/emulator_server.py</code> from a checkout."),
-    )
-    for anchor, _ in adaptations:
-        count = html.count(anchor)
-        if count != 1:
-            raise CompilerError(f"{index} carries {anchor!r} {count} times; the post-step "
-                                f"expects it exactly once")
-    for anchor, replacement in adaptations:
-        html = html.replace(anchor, replacement)
-    shutil.copytree(COMPILER, site / "compiler")
-    for name in ("build.js", "worker.js"):
-        shutil.copyfile(STATIC / "compiler" / name, site / "compiler" / name)
-    shutil.copyfile(STATIC / "inpage" / "compile.js", site / "inpage" / "compile.js")
-    index.write_text(html, encoding="utf-8")
-    shutil.rmtree(SITE_WITH_COMPILER, ignore_errors=True)
-    site.replace(SITE_WITH_COMPILER)
-    return SITE_WITH_COMPILER
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--site", action="store_true",
-                        help=f"and write {SITE_WITH_COMPILER.relative_to(REPO)}: build/site "
-                             "with the compiler in it (the post-step)")
     parser.add_argument("--no-sources", action="store_true",
-                        help="leave out source/: for a build only tests read")
+                        help="leave out source/: for a build only tests read, which may "
+                             "not be published")
     args = parser.parse_args(argv)
-    # Refused before building: the build would replace a publishable bundle
-    # with one install_into_site then refuses.
-    if args.site and args.no_sources:
-        parser.error("--site publishes the bundle, which then must carry source/: "
-                     "drop --no-sources")
     try:
         manifest = build(sources=not args.no_sources)
-        site = install_into_site() if args.site else None
     except CompilerError as exc:
         print(f"build_compiler: {exc}", file=sys.stderr)
         return 1
     print(f"{COMPILER}: {len(manifest['files'])} files the page may fetch, "  # type: ignore[arg-type]
           f"{manifest['total'] / 1e6:.1f} MB, version {manifest['version']}")
-    if site is not None:
-        print(f"{site}: python -m http.server -d {site.parent} 8123, then "
-              f"http://127.0.0.1:8123/{site.name}/")
     return 0
 
 

@@ -18,10 +18,11 @@ folder this writes.
 
 | in `build/site/`      | from                                                   |
 |---|---|
-| `index.html`, page JS | `webui/static/`; `page()` adds the transport and notice |
+| `index.html`, page JS | `webui/static/`; `page()` adds the transport, the compiler and the notice |
 | `inpage/`             | `webui/static/inpage/`                                 |
 | `pyodide/`            | the pinned Pyodide release, fetched and sha256-checked |
 | `openhardware.zip`    | `BUNDLE`, plus every core compiled by `wasm_cores()`   |
+| `compiler/`           | `tools/build_compiler.py` (OH-244): GCC as WebAssembly, what a build reads, its NOTICE.txt and source/; and `webui/static/compiler/` |
 
 ## Why the cores are compiled here and not by CMake
 
@@ -63,7 +64,7 @@ import zipfile
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from tools import build_core, site_licences  # noqa: E402
+from tools import build_compiler, build_core, site_licences  # noqa: E402
 
 STATIC = REPO / "webui" / "static"
 SITE = REPO / "build" / "site"
@@ -147,6 +148,9 @@ PAGE_FILES = (
     "inpage/transport.js",
     "inpage/worker.js",
     "inpage/inpage.css",
+    "inpage/compile.js",
+    "compiler/build.js",
+    "compiler/worker.js",
 )
 
 #: The Python the page runs, as globs from the repository root.
@@ -369,6 +373,8 @@ def bundle(cores: list[pathlib.Path], dest: pathlib.Path) -> pathlib.Path:
 #: once: twice and the transport would run before only one of them.
 EMULATOR_SCRIPT = '<script src="/emulator.js"></script>'
 TRANSPORT_SCRIPT = '<script src="inpage/transport.js"></script>'
+#: The compiler goes between them: it wraps the transport's fetch (OH-244).
+COMPILE_SCRIPT = '<script src="inpage/compile.js"></script>'
 
 #: The page's stylesheet, and the notice's, which follows it (OH-239).
 EMULATOR_STYLE = '<link rel="stylesheet" href="/emulator.css" />'
@@ -406,26 +412,23 @@ NOTICE = """<aside class="inpage" aria-label="About this copy">
   <p><strong>This copy of OpenHardware runs in your browser, with no
     server.</strong> <span id="inpage-status" role="status">Starting…</span></p>
   <p>It runs the sample programs, and any firmware image you built yourself:
-    pick a board and load the image in the board panel. It cannot compile a
-    sketch, which needs a toolchain; for that, run
-    <code>python webui/emulator_server.py</code> from a checkout. Whose
-    work is in it, and under what licence: <a href="NOTICE.txt">NOTICE.txt</a>.
+    pick a board and load the image in the board panel. It compiles a sketch
+    in this tab for the boards whose compiler it carries, fetching that
+    compiler the first time Build is pressed
+    (<a href="compiler/NOTICE.txt">its licences and source</a>); for any
+    other board, run <code>python webui/emulator_server.py</code> from a
+    checkout. Whose work is in it, and under what licence:
+    <a href="NOTICE.txt">NOTICE.txt</a>.
     <span id="inpage-release"></span></p>
 </aside>"""
 
 #: The Build button, disabled in the page itself rather than by a script.
-#: `emulator.js` greys it only once `/api/board/pins` answers, which at first
-#: load it refuses -- no board is loaded -- so a script-free page would offer
-#: a button whose every press is refused.
+#: `emulator.js` reflects whether a board builds when the picker CHANGES, not
+#: when it is first filled; `inpage/compile.js` does that first one, once the
+#: board list is in, and until then nothing can be built.
 BUILD_BUTTON = '<button id="sketch-build" class="primary">'
 BUILD_BUTTON_HERE = ('<button id="sketch-build" class="primary" disabled '
-                     'title="Compiling needs the local server">')
-
-#: The line beside it, which said "Uses the board picked above."
-SKETCH_REPORT = '<span class="note" id="sketch-report">Uses the board picked above.</span>'
-SKETCH_REPORT_HERE = ('<span class="note" id="sketch-report">Compiling needs the '
-                      'local server, and this copy has none: load an image you '
-                      'built in the board panel above.</span>')
+                     'title="Waiting for the board list">')
 
 #: Each `(anchor, replacement)` `page()` makes in `emulator.html`. Every
 #: anchor must be there exactly once: an anchor that moved would otherwise
@@ -435,8 +438,7 @@ ADAPTATIONS = (
     (IMPORT_MAP, IMPORT_MAP_HERE),
     (TOOLBAR, f"{NOTICE}\n\n{TOOLBAR}"),
     (BUILD_BUTTON, BUILD_BUTTON_HERE),
-    (SKETCH_REPORT, SKETCH_REPORT_HERE),
-    (EMULATOR_SCRIPT, f"{TRANSPORT_SCRIPT}\n{EMULATOR_SCRIPT_HERE}"),
+    (EMULATOR_SCRIPT, f"{TRANSPORT_SCRIPT}\n{COMPILE_SCRIPT}\n{EMULATOR_SCRIPT_HERE}"),
     (PANEL_SCRIPT, PANEL_SCRIPT_HERE),
     (CLOCK_IMPORT, CLOCK_IMPORT_HERE),
 )
@@ -575,6 +577,25 @@ def runtime_notice(dest: pathlib.Path) -> pathlib.Path:
     return notice
 
 
+# --- the compiler -------------------------------------------------------------
+
+
+def compiler(dest: pathlib.Path) -> dict[str, object]:
+    """`compiler/`: tools/build_compiler.py's bundle, built now, beside the
+    two scripts PAGE_FILES puts there. Returns its manifest.
+
+    Built with its source/, which `build_compiler.build` leaves out only when
+    told the bundle is for tests: the site distributes GCC's object code, and
+    the GPL asks that its source go with it.
+    """
+    try:
+        manifest = build_compiler.build()
+    except build_compiler.CompilerError as exc:
+        raise SiteError(f"the compiler: {exc}") from exc
+    shutil.copytree(build_compiler.COMPILER, dest, dirs_exist_ok=True)
+    return manifest
+
+
 # --- the whole thing ----------------------------------------------------------
 
 
@@ -587,8 +608,11 @@ def _write_site(site: pathlib.Path) -> dict[str, int]:
         (site / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, site / name)
     html = (STATIC / "emulator.html").read_text(encoding="utf-8")
+    # The compiler's bundle is built, not tracked, so what the release says it
+    # was built from names what builds it.
     shipped = [*(STATIC / name for name in PAGE_FILES), STATIC / "emulator.html",
-               *bundle_files()]
+               *bundle_files(), pathlib.Path(build_compiler.__file__),
+               *sorted(path for path in build_compiler.TOOLCHAIN_DIR.iterdir() if path.is_file())]
     release, built_from = version(), commit(REPO, shipped)
     print(f"  release   OpenHardware {release}, built from {built_from}")
     (site / "index.html").write_text(stamp(page(html), release, built_from),
@@ -605,6 +629,7 @@ def _write_site(site: pathlib.Path) -> dict[str, int]:
         cores = wasm_cores(pathlib.Path(scratch))
         zipped = bundle(cores, site)
         cores_size = sum(core.stat().st_size for core in cores)
+    compiled = compiler(site / "compiler")
     return {
         "page": sum((site / name).stat().st_size for name in PAGE_FILES)
         + (site / "index.html").stat().st_size,
@@ -614,6 +639,10 @@ def _write_site(site: pathlib.Path) -> dict[str, int]:
         "models": sum(path.stat().st_size for path in (site / "models").rglob("*")
                       if path.is_file()),
         "notices": notice.stat().st_size,
+        "compiler (fetched on Build)": compiled["total"],  # type: ignore[dict-item]
+        "compiler source": sum(path.stat().st_size
+                               for path in (site / "compiler" / "source").rglob("*")
+                               if path.is_file()),
     }
 
 

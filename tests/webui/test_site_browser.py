@@ -8,7 +8,8 @@
 node. This holds what only a page shows: that `inpage/transport.js` takes the
 page's own `fetch` calls to the Worker, that the page's controls drive it --
 a sample from the toolbar, a board from an image chosen in the file picker --
-and that the copy says, before anyone presses it, that it cannot build.
+and that for a board it has no compiler for, the copy says so before anyone
+presses Build. `test_compiler_page.py` holds the boards it does build.
 
 The server here is `http.server`'s file handler and nothing else, so an
 `/api/` request answered at all was answered inside the tab: the handler has
@@ -38,6 +39,10 @@ TESTS = REPO / "tests"
 #: Long, because the first request waits for Pyodide to boot and the cores to
 #: compile, which on a slow runner is tens of seconds.
 BOOT_MS = 120_000
+
+#: A board the local server builds and this copy has no compiler for: an
+#: ESP32's, whose compiler is the last OH-244 brings to the page.
+NOT_BUILT_HERE = "XIAO-ESP32-C3-DIP"
 
 
 class _Quiet(http.server.SimpleHTTPRequestHandler):
@@ -152,9 +157,13 @@ def test_an_uploaded_uno_image_blinks_pin_13(tab):
     assert {"high", "low"} <= set(seen), seen
 
 
-def test_the_build_button_is_disabled_and_says_why(tab):
+def test_a_board_this_copy_cannot_build_has_build_off_and_says_to_use_the_local_server(tab):
+    tab.select_option("#board-pick", NOT_BUILT_HERE)
+    tab.dispatch_event("#board-pick", "change")
+    tab.wait_for_function(
+        "document.getElementById('sketch-report').textContent.includes('local server')",
+        timeout=BOOT_MS)
     assert tab.is_disabled("#sketch-build")
-    assert "local server" in tab.text_content("#sketch-report")
 
 
 def test_no_request_leaves_the_site(tab, served):

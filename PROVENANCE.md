@@ -542,11 +542,9 @@ every input is fetched pinned by size and sha256 (`AVR_SOURCES`,
 `AVR_RELEASE`, `AVR_CORE`, `AVR_LIBC` and `TOOLCHAIN_AVR` in that file).
 Checked 2026-10-16.
 
-**Where it is published, so far:** nowhere. `build/site/` does not carry it
-yet, because `tools/build_site.py` is OH-243's until that ticket is done;
-`python tools/build_compiler.py --site` writes a copy of the site with the
-compiler in it, `build/site-with-compiler/`, and nothing deploys that copy.
-The Pages workflow runs `tools/build_site.py` alone.
+**Where it is published:** wherever `build/site/` is. `tools/build_site.py`
+builds the bundle, with its `source/`, and copies it into the site as
+`compiler/`, so the Pages workflow publishes it with the rest of the page.
 
 What it carries, and under what:
 
@@ -594,8 +592,9 @@ How each licence's conditions are met:
   is the opening comment of `backtrace.h`, written out by `LEADING_COMMENTS`.
   zlib's licence asks nothing of a binary, and is named anyway.
 - **A bundle without its source is never published.** `--no-sources` builds
-  one for tests; its `NOTICE.txt` opens by saying it may not be published,
-  and `--site` refuses it.
+  one for tests, and its `NOTICE.txt` opens by saying it may not be
+  published; `tools/build_site.py` never asks for one, and builds the bundle
+  it publishes afresh each time.
 - `compiler/NOTICE.txt` says all of this in plain text for whoever opens the
   folder, file by file.
 
