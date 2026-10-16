@@ -64,10 +64,17 @@ LIB_DIR = BUILD_DIR / "lib"
 #: This was three literals naming i8086 directly. It is a pattern now because
 #: `core/` is about to hold more than one architecture, and a hardcoded name
 #: is the kind of thing a second core discovers by failing to build.
+#:
+#: `Emscripten` is Pyodide in a browser tab (OH-238). `platform.system()`
+#: answers that there, and the library is a wasm side module that
+#: `tools/build_site.py` compiles and puts in this same `build/lib/` inside
+#: the bundle it ships, so the bindings in `core/*/abi.py` load it unchanged.
+#: Nothing builds one from here: `build()` needs cmake, which a tab has not.
 LIB_NAME_PATTERNS = {
     "Windows": "{}.dll",
     "Darwin": "lib{}.dylib",
     "Linux": "lib{}.so",
+    "Emscripten": "lib{}.so",
 }
 
 #: The directory every core lives under. A core is any subdirectory of it with
