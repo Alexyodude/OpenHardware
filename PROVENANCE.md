@@ -23,6 +23,7 @@ facts to hand them.
 | `webui/static/vendor/` | **MIT** © three.js authors | vendored dependency, unmodified |
 | `tests/fixtures/sst8088/` | **MIT** © Daniel Balsom | excerpt of SingleStepTests/8088 |
 | `build/site/`, built and never tracked | **MIT**, with Pyodide's runtime under its own licences and 3D models under **CC BY-SA 4.0** | the static site, which redistributes everything it serves; see §4 |
+| `build/compiler/`, built and never tracked | **GPL-3.0-or-later** and **LGPL**, with its source beside it | avr-gcc as WebAssembly, for the static site's Build; see §4 |
 
 PICSimLab itself is **not distributed with this software**. It is located at
 runtime, from wherever the user installed it. The static site does not carry
@@ -527,6 +528,87 @@ it already requires. Checked 2026-10-16.
   GitHub Pages workflow (`.github/workflows/pages.yml`) builds none. So the
   hosted site carries no 3D model at all, and draws every board as its
   extruded footprint. Only a local build carries the shipped ones.
+- **The compiler** a static site builds sketches with is GPL and LGPL code,
+  and has its own section, below.
+
+### The compiler the static site redistributes, never tracked (OH-244)
+
+`tools/build_compiler.py` writes `build/compiler/`: avr-gcc and binutils
+compiled to WebAssembly, the headers and libraries they read, and the Arduino
+core compiled by them, which the page fetches the first time Build is pressed
+and compiles sketches with in the tab. Publishing it is distribution, of GPL
+and LGPL code. **None of it is in this tree**: `build/` is gitignored, and
+every input is fetched pinned by size and sha256 (`AVR_SOURCES`,
+`AVR_RELEASE`, `AVR_CORE`, `AVR_LIBC` and `TOOLCHAIN_AVR` in that file).
+Checked 2026-10-16.
+
+**Where it is published, so far:** nowhere. `build/site/` does not carry it
+yet, because `tools/build_site.py` is OH-243's until that ticket is done;
+`python tools/build_compiler.py --site` writes a copy of the site with the
+compiler in it, `build/site-with-compiler/`, and nothing deploys that copy.
+The Pages workflow runs `tools/build_site.py` alone.
+
+What it carries, and under what:
+
+| files | what | licence |
+|---|---|---|
+| `avr/tools/cc1plus.*` | GCC 7.3.0's C++ compiler, with Arduino's Atmel patch | GPL-3.0-or-later |
+| the same | GMP 5.0.2 and MPFR 3.1.0, linked into it | LGPL-3.0-or-later |
+| the same | MPC 0.9, linked into it | LGPL-2.1-or-later |
+| the same | GCC's libbacktrace, linked into it | BSD-3-Clause |
+| `cc1plus.*` and `avr-{as,ld,objcopy}.*` | GCC's and binutils' own copies of zlib | the zlib licence |
+| `avr/tools/avr-{as,ld,objcopy}.*` | binutils 2.26.20160125, Atmel's 3.6.1 snapshot | GPL-3.0-or-later |
+| each tool's `.mjs`, and each `.wasm` | Emscripten 5.0.3's runtime; musl; LLVM's libc++, libc++abi, compiler-rt | MIT or NCSA; MIT; Apache-2.0 WITH LLVM-exception |
+| `avr/fs/opt/avr/lib/gcc/` | GCC's own headers and `libgcc.a`, from Arduino's release | GPL-3.0-or-later WITH GCC-exception-3.1 |
+| `avr/fs/opt/avr/avr/` | avr-libc 2.0.0's headers, start file and libraries | modified BSD |
+| `avr/fs/opt/avr/avr/lib/ldscripts/avr5.xn` | binutils' linker script | the FSF's all-permissive notice |
+| `avr/fs/arduino-avr/`, `avr/fs/objects/` | the Arduino AVR core 1.8.8's headers, and its sources compiled | LGPL-2.1-or-later, with the exceptions below |
+
+The core is not uniformly LGPL, and the exceptions were read out of each file
+the bundle carries: the SPI library is offered under "either the GNU General
+Public License version 2 or the GNU Lesser General Public License version
+2.1", with no later version; `USBCore.h` and `USBDesc.h` carry Peter Barrett's
+ISC-style permission; `Udp.h` is MIT; `new.h` states nothing.
+
+How each licence's conditions are met:
+
+- **GPL-3.0 §6(d), source from the same place.** `compiler/source/` sits beside
+  the object code on the same site, and is the Corresponding Source: every
+  pinned archive and patch the tools are compiled from; Arduino's
+  `toolchain-avr` at 368b87a, the scripts that built the release's
+  `libgcc.a`, with that release itself; and `source/openhardware/`, the
+  scripts that control this compilation: the Dockerfile, which pins its
+  emsdk image by digest, `build-avr.sh`, `drive.mjs`, `build_compiler.py`,
+  `build.js` and `worker.js`. Emscripten is a generally available program
+  used unmodified, which §1 leaves out of the Corresponding Source. The page
+  never fetches `source/`: it is 149 MB, and is there for whoever wants it.
+- **LGPL**, for GMP, MPFR and MPC linked into `cc1plus`, and for the core:
+  their source is in `source/` with the rest, and `licenses/` carries LGPL-2.1
+  and LGPL-3.0 whole.
+- **The notice licences**, BSD, MIT, ISC-style and the FSF's: avr-libc's
+  `LICENSE`, libbacktrace's, Emscripten's, musl's `COPYRIGHT` and LLVM's
+  texts are in `licenses/`; Barrett's, `Udp.h`'s and the linker script's
+  notices travel in their own files, which are carried unmodified. The
+  Emscripten texts are copied out of the image that linked the tools, by
+  `build-avr.sh`; libbacktrace has no licence file of its own, so its notice
+  is the opening comment of `backtrace.h`, written out by `LEADING_COMMENTS`.
+  zlib's licence asks nothing of a binary, and is named anyway.
+- **A bundle without its source is never published.** `--no-sources` builds
+  one for tests; its `NOTICE.txt` opens by saying it may not be published,
+  and `--site` refuses it.
+- `compiler/NOTICE.txt` says all of this in plain text for whoever opens the
+  folder, file by file.
+
+**A sketch's image** links the core, avr-libc and `libgcc`. It is built in the
+user's tab and never leaves it. `libgcc`'s exception puts no condition on it;
+the core's LGPL does if the user distributes the image, and the notice says
+so.
+
+**`@horang-corp/avr-gcc-wasm` was looked at and not used**: its own code
+states no licence, it ships no build scripts for its WebAssembly (its notices
+ask a distributor to supply them), and its binutils 2.42 is not the 2.26 the
+server's builds are made with. `docs/superpowers/plans/2026-10-16-web-compile.md`
+records the rest.
 
 ---
 
