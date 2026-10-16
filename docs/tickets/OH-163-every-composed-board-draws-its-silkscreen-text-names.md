@@ -6,7 +6,6 @@ status: open
 priority: P2
 created: '2026-09-04'
 touches:
-- PROVENANCE.md
 - tools/kicad.py
 - tests/rules/test_kicad.py
 - tools/model_from_datasheet.py
@@ -176,3 +175,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-15:** Lends tools/import_3d_model.py and tests/rules/test_import_3d_model.py to OH-161 (step 5 slice 4d: the MCP9808's MSOP-8 PARTS row, its leads named from KiCad's footprint); they come back when slice 4d lands.
 
 **Note 2026-10-15:** 2026-10-15: takes back tools/import_3d_model.py and tests/rules/test_import_3d_model.py from OH-161 (slice 4d merged, master 7b81ee3). From OH-161's review: part_pads parses the footprint twice after the pin check, and the MSOP-8 STEP is fetched from KiCad master without a pin.
+
+**Note 2026-10-16:** Lends PROVENANCE.md to OH-241 (the static site: which 3D models and runtime files it may publish, and their notices); then OH-244 borrows it for its browser compiler's section. It comes back when both are done.
