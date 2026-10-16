@@ -22,9 +22,11 @@ facts to hand them.
 | `patches/` | **GPL-2-or-later** | diffs against PICSimLab's GPL source |
 | `webui/static/vendor/` | **MIT** © three.js authors | vendored dependency, unmodified |
 | `tests/fixtures/sst8088/` | **MIT** © Daniel Balsom | excerpt of SingleStepTests/8088 |
+| `build/site/`, built and never tracked | **MIT**, with Pyodide's runtime under its own licences and 3D models under **CC BY-SA 4.0** | the static site, which redistributes everything it serves; see §4 |
 
 PICSimLab itself is **not distributed with this software**. It is located at
-runtime, from wherever the user installed it.
+runtime, from wherever the user installed it. The static site does not carry
+it either: it runs this repository's own cores, never PICSimLab's.
 
 ---
 
@@ -474,7 +476,57 @@ each against its size and sha256 (`ADAFRUIT_QTPY_PINNED`,
   published, because each is a derivative of an MIT-licensed file. The
   components line each one carries names the STEP and its licence, and is
   **not** the notice: the licence's copyright line and permission text must
-  accompany any published `.glb`.
+  accompany any published `.glb`. The static site, below, publishes three:
+  their `models/NOTICE.txt` carries that text whole.
+
+### Redistributed by the static site, never tracked (OH-238, OH-241)
+
+`tools/build_site.py` writes `build/site/`, a folder published as a website,
+so everything in it is redistributed, and the build decides file by file
+what may go in. **None of it is in this tree**: `build/` is gitignored, and
+what the build does not write itself it fetches pinned or reads from a tool
+it already requires. Checked 2026-10-16.
+
+- **Pyodide 314.0.7** -- CPython 3.14.2 compiled to WebAssembly, with
+  Emscripten 5.0.3's runtime and the C and C++ libraries it links -- is
+  fetched as its release tarball, checked by size and sha256 (`PYODIDE` in
+  `tools/build_site.py`), and copied unmodified, except that `pyodide.mjs` and
+  `pyodide.asm.mjs` are renamed to end `.mjs.js` (`PYODIDE_RUNTIME` says why).
+  Pyodide is MPL-2.0, CPython PSF-2.0, Emscripten MIT or NCSA, musl MIT, and
+  LLVM's libc++, libc++abi, libunwind and compiler-rt Apache-2.0 WITH
+  LLVM-exception. The site's `NOTICE.txt` carries each of those texts whole.
+  Pyodide's and CPython's texts, including CPython's `Doc/license.rst` for
+  what CPython incorporates, are fetched pinned (`RUNTIME_TEXTS` in
+  `tools/site_licences.py`). The others are read from the Emscripten tree
+  the build already requires, which is the version Pyodide's main module was
+  linked by. MPL-2.0 binds per file, and Pyodide's files are unmodified; their
+  source is at <https://github.com/pyodide/pyodide/tree/314.0.7>.
+- **The cores** in the site's `openhardware.zip` are `core/*` compiled to
+  WebAssembly side modules, beside the Python under `webui/` and `tools/`
+  that the page runs: this repository's own, MIT.
+- **A 3D model ships only where `tools/site_licences.py` gives it a row.**
+  A model with no row stops the build. A shipped row names the
+  `tools/board_sources.py` source its board file is from, and the build
+  refuses it unless that licence was read from a licence file and is
+  CC BY-SA 4.0, CC BY-SA 3.0 (whose §4(b) allows an adaptation under a later
+  version) or MIT. A shipped model is published under CC BY-SA 4.0, and
+  `models/NOTICE.txt` names each one's board file and licence, KiCad's and
+  Espressif's component libraries, and the MIT texts of Adafruit_CAD_Parts
+  and PCBCUPID's glyph-mini-2040, whole. KiCad's own part meshes ship as
+  they are licensed.
+- **Withheld**, each a question left open and not a finding:
+  - every Seeed model, composed or Seeed's own mesh. Whether Seeed's terms
+    allow republishing is OH-234, the owner's question.
+  - the PCBCUPID Glyph C3 and C6. Their licence is stated in a README, not
+    opened (2g).
+  - both Olimex boards. They are under CERN-OHL, which 2g leaves to the
+    owner.
+  `python tools/site_licences.py` prints the decision for every model on the
+  machine.
+- **The models are built on the machine that runs the build**, and the
+  GitHub Pages workflow (`.github/workflows/pages.yml`) builds none. So the
+  hosted site carries no 3D model at all, and draws every board as its
+  extruded footprint. Only a local build carries the shipped ones.
 
 ---
 

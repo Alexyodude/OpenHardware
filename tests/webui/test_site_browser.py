@@ -78,13 +78,17 @@ def tab(browser, served):
     for: `tab.asked`."""
     context = browser.new_context(viewport={"width": 1400, "height": 1000})
     asked: list[str] = []
+    refused: list[str] = []
     context.on("request", lambda request: asked.append(request.url))
+    context.on("response", lambda response: response.status >= 400
+               and refused.append(f"{response.status} {response.url}"))
     page = context.new_page()
     page.goto(served)
     page.wait_for_function(
         "document.getElementById('inpage-status').textContent.startsWith('Ready')",
         timeout=BOOT_MS)
     page.asked = asked
+    page.refused = refused
     yield page
     context.close()
 
@@ -153,3 +157,20 @@ def test_no_request_leaves_the_site(tab, served):
         "document.getElementById('counter').textContent === '0 steps'")
     assert tab.asked
     assert [url for url in tab.asked if not url.startswith(served)] == []
+
+
+def test_every_file_the_page_asks_the_site_for_is_there(tab):
+    """models/index.json included, which OH-241 writes even when no model
+    ships: the page's request for it was a 404 until then."""
+    tab.select_option("#sample", index=0)
+    tab.click("#load")
+    tab.wait_for_function(
+        "document.getElementById('counter').textContent === '0 steps'")
+    assert any(url.endswith("/models/index.json") for url in tab.asked)
+    assert tab.refused == []
+
+
+def test_the_notice_links_the_licences_the_site_is_under(tab):
+    with tab.expect_navigation():
+        tab.click(".inpage a[href='NOTICE.txt']")
+    assert "Mozilla Public License" in tab.text_content("body")

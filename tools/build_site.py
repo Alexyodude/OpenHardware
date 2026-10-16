@@ -62,7 +62,7 @@ import zipfile
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from tools import build_core  # noqa: E402
+from tools import build_core, site_licences  # noqa: E402
 
 STATIC = REPO / "webui" / "static"
 SITE = REPO / "build" / "site"
@@ -230,16 +230,21 @@ def core_sources(core: str) -> list[pathlib.Path]:
     return sources
 
 
+def emscripten() -> pathlib.Path:
+    """Emscripten's own directory: under `$EMSDK` where it is set (emsdk's
+    environment script sets it), else under `third_party/emsdk`."""
+    root = (pathlib.Path(os.environ["EMSDK"]) if os.environ.get("EMSDK")
+            else REPO / "third_party" / "emsdk")
+    return root / "upstream" / "emscripten"
+
+
 def em_cxx() -> list[str]:
     """The command that runs Emscripten's `em++`, checked to be 5.0.3.
 
-    `$EMSDK` where it is set (emsdk's own environment script and CI set it),
-    else `third_party/emsdk`. Run through this interpreter rather than as
-    `em++`, which is a `.bat` on Windows and a shell script elsewhere.
+    Run through this interpreter rather than as `em++`, which is a `.bat` on
+    Windows and a shell script elsewhere.
     """
-    root = (pathlib.Path(os.environ["EMSDK"]) if os.environ.get("EMSDK")
-            else REPO / "third_party" / "emsdk")
-    script = root / "upstream" / "emscripten" / "em++.py"
+    script = emscripten() / "em++.py"
     if not script.is_file():
         raise SiteError(
             f"no Emscripten at {script}. Install the one Pyodide was built "
@@ -281,9 +286,13 @@ def wasm_cores(out: pathlib.Path) -> list[pathlib.Path]:
 
 
 def fetch_pinned(pin: Pinned) -> pathlib.Path:
-    """`pin`'s file in `third_party/site-cache/`, fetched once and checked."""
+    """`pin`'s file in `third_party/site-cache/`, fetched once and checked.
+
+    Cached under its hash as well as its name: four of the licence texts the
+    site carries are each called LICENSE.
+    """
     CACHE.mkdir(parents=True, exist_ok=True)
-    path = CACHE / pin.url.rsplit("/", 1)[1]
+    path = CACHE / f"{pin.sha256[:12]}-{pin.url.rsplit('/', 1)[1]}"
     if not path.is_file():
         partial = path.with_name(path.name + ".part")
         with urllib.request.urlopen(pin.url, timeout=120) as response:
@@ -393,7 +402,8 @@ NOTICE = """<aside class="inpage" aria-label="About this copy">
   <p>It runs the sample programs, and any firmware image you built yourself:
     pick a board and load the image in the board panel. It cannot compile a
     sketch, which needs a toolchain; for that, run
-    <code>python webui/emulator_server.py</code> from a checkout.</p>
+    <code>python webui/emulator_server.py</code> from a checkout. Whose
+    work is in it, and under what licence: <a href="NOTICE.txt">NOTICE.txt</a>.</p>
 </aside>"""
 
 #: The Build button, disabled in the page itself rather than by a script.
@@ -446,6 +456,55 @@ def page(html: str) -> str:
     return html
 
 
+# --- what may ship, and the notices -------------------------------------------
+
+#: What the page is given when this machine has built no models, as CI has
+#: not: the page draws every board as its footprint, and asks for no file.
+NO_MODELS = {"units": "mm", "boards": {}, "parts": {"libraries": {}}}
+
+
+def _text(pin: site_licences.Pinned) -> str:
+    return fetch_pinned(Pinned(*pin)).read_text(encoding="utf-8")
+
+
+def models(dest: pathlib.Path,
+           source: pathlib.Path = site_licences.MODELS) -> site_licences.Selection:
+    """The models `tools/site_licences.py` lets ship, from `source` into
+    `dest`, with an `index.json` naming only them and `NOTICE.txt`.
+
+    `index.json` is written even when nothing ships, so the page's request
+    for it is answered rather than refused.
+    """
+    index_file = source / "index.json"
+    index = (json.loads(index_file.read_text(encoding="utf-8"))
+             if index_file.is_file() else NO_MODELS)
+    selection = site_licences.select(index, site_licences.on_disk(source))
+    for name in selection.files:
+        (dest / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source / name, dest / name)
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "index.json").write_text(json.dumps(selection.index, indent=1),
+                                     encoding="utf-8")
+    named = {key for row in selection.shipped.values() for key in row.notices}
+    texts = {key: _text(site_licences.NOTICE_TEXTS[key]) for key in named}
+    (dest / "NOTICE.txt").write_text(site_licences.model_notice(selection, texts),
+                                     encoding="utf-8")
+    return selection
+
+
+def runtime_notice(dest: pathlib.Path) -> pathlib.Path:
+    """`NOTICE.txt`: every licence the vendored runtime is under, whole."""
+    texts = {title: _text(pin) for title, pin in site_licences.RUNTIME_TEXTS.items()}
+    for title, relative in site_licences.EMSCRIPTEN_TEXTS.items():
+        path = emscripten() / relative
+        if not path.is_file():
+            raise SiteError(f"{title}'s licence is not at {path}")
+        texts[title] = path.read_text(encoding="utf-8")
+    notice = dest / "NOTICE.txt"
+    notice.write_text(site_licences.runtime_notice(texts), encoding="utf-8")
+    return notice
+
+
 # --- the whole thing ----------------------------------------------------------
 
 
@@ -461,6 +520,12 @@ def _write_site(site: pathlib.Path) -> dict[str, int]:
     (site / "index.html").write_text(page(html), encoding="utf-8")
 
     runtime = pyodide_runtime(site / "pyodide")
+    notice = runtime_notice(site)
+    selection = models(site / "models")
+    for name, row in sorted(selection.shipped.items()):
+        print(f"  ships     models/{name}")
+    for name, row in sorted(selection.withheld.items()):
+        print(f"  withheld  models/{name}: {row.why}")
     with tempfile.TemporaryDirectory() as scratch:
         cores = wasm_cores(pathlib.Path(scratch))
         zipped = bundle(cores, site)
@@ -471,6 +536,9 @@ def _write_site(site: pathlib.Path) -> dict[str, int]:
         "pyodide": sum(path.stat().st_size for path in runtime),
         "openhardware.zip": zipped.stat().st_size,
         "cores (inside the zip)": cores_size,
+        "models": sum(path.stat().st_size for path in (site / "models").rglob("*")
+                      if path.is_file()),
+        "notices": notice.stat().st_size,
     }
 
 

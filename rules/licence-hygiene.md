@@ -118,14 +118,25 @@ MIT, BSD, and Apache-2.0 are all fine now (see §0). Full list:
 | pytest | MIT | installed | the test suites |
 | websockets | BSD-3-Clause | installed | `webui/bridge.py` |
 | three.js 0.185.1 | MIT | **vendored** | `webui/static/scene3d.js` |
+| Pyodide 314.0.7 (CPython 3.14.2, Emscripten 5.0.3's libraries) | MPL-2.0; PSF-2.0; MIT, NCSA, Apache-2.0 WITH LLVM-exception | **redistributed** by the static site, fetched pinned, never tracked | `tools/build_site.py` (OH-238) |
+| Emscripten 5.0.3 | MIT or NCSA | installed into `third_party/emsdk` | `tools/build_site.py` compiles the cores |
+| Playwright 1.64.0 | Apache-2.0 | installed | `tests/webui/test_site_browser.py` |
 
 Vendoring three.js is what the offline guarantee requires — a page that fetches
 a renderer from a CDN is not offline, and `webui.pkg.offline-guarantee` is a
 ledger cell whose oracle is the browser's own network log. It costs ~2.1 MB.
 
+**The static site redistributes everything it serves** (OH-241), so what it
+ships is decided file by file, not by directory. Pyodide's runtime goes into
+`build/site/` with its licence texts beside it, in `NOTICE.txt`; a 3D model
+ships only where `tools/site_licences.py` gives it a row whose board file was
+read under a licence that allows it, and each shipped model's notice goes in
+`models/NOTICE.txt`. Neither is in this tree: both are fetched or built into
+the gitignored `build/`.
+
 **This section is still knowingly weaker than its own standard.** Its previous
 version said it should become SCRIPT-ENFORCED "the moment a second or third
-dependency shows up"; there are four. The checker needs a declared manifest to
+dependency shows up"; the table above has well past three. The checker needs a declared manifest to
 check against and there is none yet. Recorded in `docs/known-issues.md` rather
 than left implicit, because a rule that quietly declines to follow its own
 instruction is the precise failure this repository exists to prevent.

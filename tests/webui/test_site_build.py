@@ -12,6 +12,7 @@ the bundle carries, and that two builds cannot run into one folder.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import pathlib
@@ -89,8 +90,9 @@ def test_every_file_the_adaptations_load_is_shipped():
     added = (re.findall(r'(?:href|src)="([^"/][^"]*)"', written)
              + re.findall(r'"\./([^"]+)"', written))
     assert {"inpage/inpage.css", "inpage/transport.js", "board3d.js",
-            "vendor/three.module.js", "clock.js"} <= set(added)
-    assert sorted(set(added) - set(build_site.PAGE_FILES)) == []
+            "vendor/three.module.js", "clock.js", "NOTICE.txt"} <= set(added)
+    # NOTICE.txt is the one the build writes rather than copies.
+    assert sorted(set(added) - {*build_site.PAGE_FILES, "NOTICE.txt"}) == []
 
 
 def test_a_page_missing_any_anchor_is_refused_by_name():
@@ -216,3 +218,87 @@ def test_a_pyodide_built_by_another_emscripten_is_refused(tmp_path, monkeypatch)
                         lambda pin: _release(tmp_path, "emscripten_4_0_9"))
     with pytest.raises(build_site.SiteError, match="emscripten_4_0_9"):
         build_site.pyodide_runtime(tmp_path / "pyodide")
+
+
+def test_two_pinned_files_with_one_name_are_cached_apart(tmp_path, monkeypatch):
+    """Four of the site's licence texts are each called LICENSE."""
+    monkeypatch.setattr(build_site, "CACHE", tmp_path)
+    first, second = b"MIT License, one\n", b"MIT License, two\n"
+    pins = [build_site.Pinned(f"https://example.com/{who}/LICENSE",
+                              hashlib.sha256(text).hexdigest(), len(text))
+            for who, text in (("a", first), ("b", second))]
+    for pin, text in zip(pins, (first, second)):
+        (tmp_path / f"{pin.sha256[:12]}-LICENSE").write_bytes(text)
+    assert [build_site.fetch_pinned(pin).read_bytes() for pin in pins] == [first, second]
+
+
+#: A machine's models/ as the composer leaves it: a board that ships, one
+#: that is withheld, and a KiCad part.
+UNO = {"file": "/models/Arduino-Uno.glb", "source": "Arduino's own EAGLE board file"}
+RP2040 = {"file": "/models/RP2040.glb", "source": "https://files.seeedstudio.com/"}
+KB2040 = {"file": "/models/Adafruit-KB2040.glb", "source": "Adafruit's own board file"}
+LED = {"file": "/models/parts/LED_D3_0mm.glb",
+       "source": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/master/x.step"}
+
+
+def _models(root: pathlib.Path, boards: dict[str, dict]) -> pathlib.Path:
+    (root / "parts").mkdir(parents=True)
+    for entry in [*boards.values(), LED]:
+        (root / entry["file"].removeprefix("/models/")).write_bytes(b"glTF")
+    (root / "index.json").write_text(json.dumps({
+        "units": "mm", "boards": boards,
+        "parts": {"source": "KiCad", "libraries": {"LED_THT": [LED]}}}), encoding="utf-8")
+    return root
+
+
+def test_with_no_models_built_the_site_still_answers_for_the_index(tmp_path):
+    build_site.models(tmp_path / "out", source=tmp_path / "none")
+    assert json.loads((tmp_path / "out" / "index.json").read_text()) == build_site.NO_MODELS
+    assert (tmp_path / "out" / "NOTICE.txt").is_file()
+    assert list((tmp_path / "out").rglob("*.glb")) == []
+
+
+def test_a_withheld_model_is_neither_copied_nor_indexed(tmp_path):
+    source = _models(tmp_path / "models", {"Arduino Uno": UNO, "XIAO-RP2040-DIP": RP2040})
+    build_site.models(tmp_path / "out", source=source)
+    copied = sorted(path.relative_to(tmp_path / "out").as_posix()
+                    for path in (tmp_path / "out").rglob("*.glb"))
+    assert copied == ["Arduino-Uno.glb", "parts/LED_D3_0mm.glb"]
+    index = json.loads((tmp_path / "out" / "index.json").read_text())
+    assert list(index["boards"]) == ["Arduino Uno"]
+
+
+def test_a_model_drawing_an_mit_work_ships_with_its_text_whole(tmp_path, monkeypatch):
+    source = _models(tmp_path / "models", {"Adafruit KB2040": KB2040})
+    mit = "MIT License\n\nCopyright (c) 2016 Adafruit Industries\n"
+    fetched = tmp_path / "fetched"
+    fetched.write_text(mit, encoding="utf-8")
+    monkeypatch.setattr(build_site, "fetch_pinned", lambda pin: fetched)
+    build_site.models(tmp_path / "out", source=source)
+    assert mit in (tmp_path / "out" / "NOTICE.txt").read_text(encoding="utf-8")
+
+
+def test_the_runtime_notice_carries_emscriptens_texts_from_its_own_tree(
+        tmp_path, monkeypatch):
+    tree = tmp_path / "emscripten"
+    for title, relative in build_site.site_licences.EMSCRIPTEN_TEXTS.items():
+        (tree / relative).parent.mkdir(parents=True, exist_ok=True)
+        (tree / relative).write_text(f"the text of {title}\n", encoding="utf-8")
+    fetched = tmp_path / "fetched"
+    fetched.write_text("a fetched licence\n", encoding="utf-8")
+    monkeypatch.setattr(build_site, "emscripten", lambda: tree)
+    monkeypatch.setattr(build_site, "fetch_pinned", lambda pin: fetched)
+    notice = build_site.runtime_notice(tmp_path).read_text(encoding="utf-8")
+    missing = [title for title in build_site.site_licences.EMSCRIPTEN_TEXTS
+               if f"the text of {title}" not in notice]
+    assert missing == []
+
+
+def test_a_runtime_licence_missing_from_emscriptens_tree_is_refused_by_name(
+        tmp_path, monkeypatch):
+    fetched = tmp_path / "fetched"
+    fetched.write_text("a fetched licence\n", encoding="utf-8")
+    monkeypatch.setattr(build_site, "emscripten", lambda: tmp_path / "empty")
+    monkeypatch.setattr(build_site, "fetch_pinned", lambda pin: fetched)
+    with pytest.raises(build_site.SiteError, match="Emscripten"):
+        build_site.runtime_notice(tmp_path)
