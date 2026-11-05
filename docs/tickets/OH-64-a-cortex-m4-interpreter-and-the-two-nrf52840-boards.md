@@ -1,13 +1,15 @@
 ---
 id: OH-64
 title: A Cortex-M4 interpreter and the two nRF52840 boards, which need an oracle first
-status: open
+status: in-progress
 priority: P2
+owner: oh-64-worktree
 created: '2026-08-26'
 touches:
 - webui/boards/nrf52840.py
 - tests/cortexm0/test_thumb2_disasm.py
 - tests/cortexm0/m4/*
+- docs/tickets/OH-64-*
 ---
 
 TWO OF THE FOURTEEN BOARDS THAT DO NOT RUN. XIAO-nRF52840-DIP and -SMD, chip nRF52840, core cortexm4. This is OH-50's residual, filed because OH-50 closed on its second Done-when and left the interpreter with no ticket of its own.
