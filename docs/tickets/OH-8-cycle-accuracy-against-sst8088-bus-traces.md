@@ -1,7 +1,7 @@
 ---
 id: OH-8
 title: Cycle accuracy against SST8088 bus traces
-status: in-progress
+status: open
 priority: P2
 owner: session/timing
 created: '2026-08-23'
