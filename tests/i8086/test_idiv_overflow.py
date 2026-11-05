@@ -81,9 +81,10 @@ def test_idiv_of_int32_min_by_minus_one_traps_and_the_host_survives():
     assert (state["ax"], state["dx"]) == (0x0000, 0x8000), (
         f"AX and DX must be untouched -- the part writes no partial answer: {shown}"
     )
-    # The pushed FLAGS word at 0000:01FE is not asserted: the core pushes the
-    # flags it came in with, and the part pushes its microcode's intermediates,
-    # which is OH-11's to model and the same for every IDIV trap.
+    # The pushed FLAGS word at 0000:01FE is not asserted: it holds the
+    # microcode's intermediates (OH-11), and the corpus has no case with this
+    # dividend to say what they are. tests/i8086/test_muldiv.py holds pushed
+    # flags where silicon does.
     assert state["sp"] == 0x01FA, f"the trap pushes FLAGS, CS and IP: {shown}"
     assert (state["pushed_cs"], state["pushed_ip"]) == (0x0000, 0x0102), (
         f"the pushed address is the one after the instruction: {shown}"

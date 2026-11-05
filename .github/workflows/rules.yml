@@ -82,9 +82,10 @@ jobs:
       #   A4 A6               MOVS and CMPS: REP, and segment overrides
       #   E4 FC               port I/O and a flag instruction
       #   F6.4                MUL, whose undefined flags are the high half's
-      #   F6.7                IDIV -- deliberately a PARTIAL file, so the
-      #                       exclusion machinery in test_conformance.py is
-      #                       exercised here rather than only locally
+      #   F6.5 F6.7           IMUL and IDIV, whose undefined flags, traps
+      #                       and REP-negated quotients are the CORX and CORD
+      #                       microcode run step by step (OH-11). F6.7 carries
+      #                       REP cases, which are what exercise the F1 latch
       #   54 FF.6             PUSH SP, both encodings. **Sampling a family is
       #                       not enough when its members differ.** 50, 51 and
       #                       52 were the sample and all three were green
@@ -106,7 +107,7 @@ jobs:
         run: >
           bash tools/get_8088_tests.sh --opcodes
           00 09 21 29 31 39 50 58 74 8B
-          D0.4 D2.2 27 D4 A4 A6 E4 FC F6.4 F6.7
+          D0.4 D2.2 27 D4 A4 A6 E4 FC F6.4 F6.5 F6.7
           54 FF.6 83 B8 C7 81.0 40 48 FE.0 FF.2
           E2 CD CF 9A 8D 8E C4 06 60 D6 D8 C0
 

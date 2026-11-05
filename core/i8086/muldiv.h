@@ -44,10 +44,16 @@ struct MulDivResult {
 ///
 /// **CF and OF mean "the result did not fit in the narrow half"** for the
 /// multiplies, and are the only flags the manual defines for any of the four.
-/// SF, ZF, PF and AF are documented undefined for all of them; muldiv.cc
-/// records what each actually leaves.
+/// SF, ZF, PF and AF are documented undefined for all of them, and so is
+/// every flag after a divide; muldiv.cc computes them the way the part's
+/// microcode does, because that is the only thing that reproduces them.
+///
+/// `negate` is the F1 latch, which a REP prefix (F2 or F3) sets: the part
+/// then returns the negated product or quotient. No assembler emits that, so
+/// it matters only to code that does it on purpose -- and to a conformance
+/// corpus, which does. The remainder is not negated.
 MulDivResult MulDiv(MulDivKind kind, std::uint16_t ax, std::uint16_t dx,
-                    std::uint16_t operand, bool wide, std::uint16_t& flags);
+                    std::uint16_t operand, bool wide, bool negate, std::uint16_t& flags);
 
 }  // namespace i8086
 

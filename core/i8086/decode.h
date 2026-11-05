@@ -84,9 +84,11 @@ struct Instruction {
     /// The override a prefix asked for, or kNone. Not the segment finally
     /// used -- that also depends on the addressing mode. See EffectiveAddress.
     Segment segment_override = Segment::kNone;
-    /// The repeat prefix, or kNone. Only the string instructions read it; on
-    /// anything else the prefix is accepted, counted in `length`, and has no
-    /// effect, which is what the part does.
+    /// The repeat prefix, or kNone. The string instructions repeat on it, and
+    /// MUL, IMUL, DIV and IDIV negate their result on it -- the prefix sets
+    /// the F1 latch their microcode tests (see muldiv.h). On anything else it
+    /// is accepted, counted in `length`, and has no effect, which is what the
+    /// part does.
     Rep repeat = Rep::kNone;
     /// Total length including prefixes. IP advances by exactly this, so an
     /// error here desynchronises every following instruction.

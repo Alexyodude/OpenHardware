@@ -573,9 +573,12 @@ StepStatus ExecuteOne(Cpu& cpu) {
                 break;
             }
             default: {
+                // A REP prefix here is not ignored: it sets the microcode's
+                // F1 latch, and the product or quotient comes back negated.
                 const MulDivResult result =
                     MulDiv(static_cast<MulDivKind>(instruction.modrm.reg), cpu.regs().ax,
-                           cpu.regs().dx, value, instruction.wide, flags);
+                           cpu.regs().dx, value, instruction.wide,
+                           instruction.repeat != Rep::kNone, flags);
                 cpu.regs().flags = static_cast<std::uint16_t>(flags | kFlagsAlwaysSet);
                 if (result.divide_error) {
                     RaiseInterrupt(cpu, 0, next_ip);

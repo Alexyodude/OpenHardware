@@ -8,6 +8,12 @@ created: '2026-08-23'
 touches:
 - tests/i8086/test_muldiv.py
 - core/i8086/muldiv.*
+- core/i8086/exec_core.cc
+- core/i8086/decode.h
+- tests/i8086/test_conformance.py
+- .github/workflows/rules.yml
+- tests/i8086/test_idiv_overflow.py
+- docs/features/i8086.md
 ---
 
 IMUL, DIV and IDIV produce correct results and correct CF/OF but do not reproduce two things that need the 8088's CORX/CORD microcode emulated step by step rather than a C++ divide.
@@ -66,3 +72,17 @@ attempts have failed to recover them. Nothing in the tree has changed that.
 **Note 2026-10-10:** 2026-10-10, from OH-222's review (by running against the fetched corpus; none of it changed here): (1) IDIV accepts a quotient of -128 (byte) where the 8088 traps: in F6.7 every case whose true quotient is -128 traps on the part (10 cases, none REP-prefixed), every -127 and +127 case does not, every +128 case traps; e.g. idx 1828, AX = -15156, BL = 118, IDIV BL -- the core writes AL = 80h, the part takes vector 0. muldiv.cc's range check uses low = wide ? -32768 : -128; the word form's edge has no F7.7 case either way. (2) The conformance floor test (tests/i8086/test_conformance.py ~401-404) drops every case where the part trapped before running it, so a core that fails to trap where the part does is never run -- which is why (1) passes; its docstring (~393-394) says it measures the trap decision. (3) The negated quotient this ticket's notes describe is exactly the REP prefix: in F7.7, 168 of 168 negated non-trapping cases are REP-prefixed and every REP-prefixed non-trapping case is negated; in F6.7, 146 of 146, plus 2 REP cases whose quotient is zero, where negation cannot show. None of the twelve predicates tried here included the prefix (note 5(a) suspected it).
 
 **Note 2026-11-05:** Taken 2026-11-05 in worktree oh-11. Plan: the thinnest verified slice first -- REP-prefixed IDIV (and IMUL, if the corpus agrees) negates its result, and IDIV traps on a quotient of -128/-32768, both from OH-222's review note; then the undefined flags.
+
+**Note 2026-11-05:** SOLVED. core/i8086/muldiv.cc no longer divides or multiplies in C++: it runs the 8088's own CORX (multiply) and CORD (divide) loops with NEGATE, PREIMUL, IMULCOF, MULCOF, PREIDIV and POSTIDIV around them, ported from MartyPC's muldiv.rs (MIT, Daniel Balsom, commit f0ebca4e411e55685b661e9efe1d136a9c727a7c; the notice is in the file's header). The undefined flags are whatever those routines leave in the ALU, and they come out right without being chosen.
+
+BOTH HALVES OF THIS TICKET HAD ONE CAUSE EACH, AND NEITHER WAS ARITHMETIC ON THE ANSWER. (1) The flags after IMUL are IMULCOF's 16-bit add of the high half and the low half's sign bit -- a 16-bit value, which is why every 8-bit candidate the 2026-08-26 note tried fit SF 98% and PF 70% and none fit exactly. After DIV and IDIV they are CORD's last flag-setting SUB with CF from its final RCL. (2) The negated IDIV quotients are the REP-prefixed cases, as lead (a) of that note suspected it was the prefix: F2 or F3 sets the microcode's F1 latch, and POSTIDIV negates the quotient (not the remainder) when it is set. Before this, 146 of F6.7's 148 untrapped REP cases and 168 of F7.7's 168 failed; none do now. Also found: IDIV r/m8 traps on a quotient of -128, which fits in a byte -- CORD's range check is on the magnitude. The old core missed 10 such traps.
+
+MEASURED against SST8088 v2 with NO flag mask and memory compared, so the pushed FLAGS of every trapped case is held too: F6.4 F6.5 F7.4 F7.5 10000/10000 each; F6.6 4801 + 5199 trapped; F7.6 4905 + 5095 trapped; F6.7 2312 + 7060 trapped + 148 REP + 480 REP-trapped; F7.7 2243 + 7090 + 168 + 499. All 80,000 exact.
+
+So PARTIAL is gone from tests/i8086/test_conformance.py, with its floors and the trapped-case exclusion: the full-corpus test now runs all eight files whole. The CI slice in .github/workflows/rules.yml gains F6.5 (IMUL), and its F6.7 comment no longer calls it a PARTIAL file. Ledger cell i8086.ins.muldiv is done. tests/i8086/test_muldiv.py holds twelve corpus cases without the corpus -- REP IDIV at both widths, the -128 trap, IMUL and DIV flags, a trap's pushed flags -- and all six of its tests were run against a build of 44ca5c8 (before this) and failed there.
+
+NOT VERIFIED BY SILICON, and said so where it matters: (a) REP in front of MUL or IMUL also negates the product per the microcode, and the corpus has no such case, so that path follows MartyPC and nothing here checks it. (b) The -32768 trap for IDIV r/m16: no register-form corpus case has that quotient; test_muldiv.py asserts the trap only, as the byte rule at the other width.
+
+FILED: OH-253, PROVENANCE.md does not record muldiv.cc as a MartyPC port (PROVENANCE.md is OH-244's, so OH-253 claims nothing until OH-244 releases it; claiming it too failed check_ticket_claims).
+
+**Note 2026-11-05:** Verified before landing: build_core OK; pytest 2776 passed, 681 skipped, 5 failed, the five being OH-250's composer tests, which fail in any worktree with no third_party fetched and touch nothing here; every other checkall row OK, with check_ticket_claims --base origin/master.
