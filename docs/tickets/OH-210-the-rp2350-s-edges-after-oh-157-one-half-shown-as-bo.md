@@ -7,8 +7,6 @@ priority: P3
 created: '2026-10-08'
 touches:
 - rules/board-claims.md
-- webui/boards/catalogue.py
-- tests/webui/test_board_catalogue.py
 ---
 
 The edges OH-157's reviews left (2026-10-08), none of which changes what the XIAO RP2350 blink shows today.
@@ -40,3 +38,5 @@ Done when each is fixed with a test that fails when reverted where it is behavio
 **Note 2026-10-15:** 2026-10-15: lends tests/webui/test_board_catalogue.py to OH-166 (the board-listing lock test's wall-clock budget); it comes back when that lands.
 
 **Note 2026-10-15:** 2026-10-15: takes back tests/webui/test_board_catalogue.py from OH-166 (its lock test watches the lock, not the clock).
+
+**Note 2026-11-05:** 2026-11-05: lends webui/boards/catalogue.py and tests/webui/test_board_catalogue.py to OH-64 for FIRMWARE_VERIFIED['nRF52840'] and the pinned verified set; items 1, 4, 5, 6 and 7 left here need neither; they come back when it lands.
