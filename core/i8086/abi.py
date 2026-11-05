@@ -36,7 +36,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match I8086_ABI_VERSION in abi.h.
-ABI_VERSION = 9
+ABI_VERSION = 10
 
 #: Must match abi.h's field order exactly -- this is a struct mirror, and a
 #: reordering here reads the wrong bytes. It does NOT need to match the
@@ -186,6 +186,9 @@ _SIGNATURES = {
     "i8086_step_entry": ([ctypes.c_void_p], ctypes.c_uint32),
     "i8086_opcode_info": ([ctypes.c_uint8], ctypes.c_int),
     "i8086_minimum_cycles": ([ctypes.c_uint8, ctypes.c_uint8], ctypes.c_uint32),
+    "i8086_register_form_cycles": (
+        [ctypes.c_char_p, ctypes.c_uint8, ctypes.c_uint8], ctypes.c_uint32,
+    ),
     "i8086_decoded_size": ([], ctypes.c_uint32),
     "i8086_decode": (
         [ctypes.c_void_p, ctypes.c_uint16, ctypes.c_uint16, ctypes.POINTER(Decoded)],
@@ -490,6 +493,25 @@ def minimum_cycles(length: int, queued: int) -> int:
     confirm.
     """
     return int(load().i8086_minimum_cycles(length & 0xFF, queued & 0xFF))
+
+
+def register_form_cycles(code: bytes, queued: int) -> int | None:
+    """Clocks for one register-form instruction, from Intel's own Table 2-21,
+    counted as the SST8088 corpus counts them -- or None where no claim is
+    made.
+
+    `code` is exactly the instruction's bytes. None covers every memory
+    operand, every data-dependent cost, every encoding Intel does not table,
+    and a queue that holds the instruction but not the opcode after it;
+    `core/i8086/timing.h` says why each is left out rather than guessed.
+    """
+    code = bytes(code)
+    if not code or len(code) > 0xFF or queued < 0:
+        return None
+    # Clamped, not masked: 256 is a queue deeper than the part's, not an
+    # empty one, and the core clamps anything above four the same way.
+    cycles = int(load().i8086_register_form_cycles(code, len(code), min(queued, 0xFF)))
+    return cycles or None
 
 
 def opcode_is_wide(opcode: int) -> bool:

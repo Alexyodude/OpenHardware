@@ -154,6 +154,11 @@ uint32_t i8086_minimum_cycles(uint8_t length, uint8_t queued) {
     return i8086::MinimumCycles(length, queued);
 }
 
+uint32_t i8086_register_form_cycles(const uint8_t* bytes, uint8_t length,
+                                    uint8_t queued) {
+    return i8086::RegisterFormCycles(bytes, length, queued);
+}
+
 int i8086_step(I8086Cpu* cpu) {
     if (cpu == nullptr) {
         return 1;

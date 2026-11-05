@@ -40,7 +40,7 @@ extern "C" {
 /// Bumped whenever this header's shape changes. Python refuses to run against
 /// a library that disagrees, which turns a silent struct mismatch into a clear
 /// failure at import.
-#define I8086_ABI_VERSION 9
+#define I8086_ABI_VERSION 10
 
 /// Mirrors i8086::Registers.
 ///
@@ -142,6 +142,15 @@ I8086_API int i8086_opcode_info(uint8_t opcode);
 /// the architecture rather than fitted to the oracle, and is therefore the
 /// part the oracle can actually check.
 I8086_API uint32_t i8086_minimum_cycles(uint8_t length, uint8_t queued);
+
+/// Clocks for a register-form instruction of `length` bytes at `bytes`, with
+/// `queued` bytes in the prefetch queue, counted from its opcode leaving the
+/// queue to the next one's doing so. 0 where no claim is made.
+///
+/// From Intel's published Table 2-21, not fitted; core/i8086/timing.h says
+/// which encodings and queue states it answers for, and why not the rest.
+I8086_API uint32_t i8086_register_form_cycles(const uint8_t* bytes, uint8_t length,
+                                              uint8_t queued);
 
 /// Execute one instruction at CS:IP, advancing IP past it.
 ///
