@@ -10,6 +10,21 @@ touches:
 - tests/cortexm0/test_thumb2_disasm.py
 - tests/cortexm0/m4/*
 - docs/tickets/OH-64-*
+- core/cortexm0/exec.cc
+- core/cortexm0/exec.h
+- core/cortexm0/cpu.h
+- core/cortexm0/cpu.cc
+- core/cortexm0/abi.h
+- core/cortexm0/abi.cc
+- core/cortexm0/abi.py
+- core/cortexm0/thumb2.cc
+- core/cortexm0/CMakeLists.txt
+- tools/m4_oracle.py
+- tests/cortexm0/test_thumb2_exec.py
+- webui/boards/catalogue.py
+- tests/webui/test_board_catalogue.py
+- tests/webui/test_nrf52840_board.py
+- docs/architectures.md
 ---
 
 TWO OF THE FOURTEEN BOARDS THAT DO NOT RUN. XIAO-nRF52840-DIP and -SMD, chip nRF52840, core cortexm4. This is OH-50's residual, filed because OH-50 closed on its second Done-when and left the interpreter with no ticket of its own.
@@ -41,3 +56,5 @@ oracle exists. Recorded so the checker's wording does not get somebody to
 Still blocked on the same thing, re-checked 2026-08-30: there is no Armv7E-M
 execution oracle here, and QEMU alone would be a single source even if it were
 installed.
+
+**Note 2026-11-05:** Oracle found 2026-11-05: Unicorn 2.1.4 (QEMU lineage) and icicle-emu 0.0.11 (Rust, Ghidra SLEIGH lineage) both run thumbv7em and pip-install on Python 3.14. Two independent implementations, so 'not QEMU alone' is met. Both are TOOL dependencies (the cadquery-ocp precedent): tools/m4_oracle.py runs each case under both, keeps only agreement, and the vectors and traces are committed under tests/cortexm0/m4/ so the test cannot skip. Claims re-added on exec.cc and cpu.h as this ticket said to; abi.py lent by OH-161, catalogue.py and its test by OH-210.
