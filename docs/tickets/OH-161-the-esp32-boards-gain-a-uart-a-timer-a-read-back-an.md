@@ -41,7 +41,6 @@ touches:
 - tests/webui/sparkfun_qwiic_pocket_esp32c6/pocket_blink.bin
 - tests/webui/sparkfun_qwiic_pocket_esp32c6/pocket_blink.ino
 - tests/webui/esp32_timing.py
-- core/cortexm0/abi.py
 - webui/static/board3d.js
 - webui/static/circuit.js
 - tests/webui/test_circuit.py
@@ -862,3 +861,5 @@ CONFIRMED FOR THE OWNER, with the design's own strongest objection recorded: opt
 **Note 2026-10-15:** 2026-10-15: lends webui/api.py, webui/static/emulator.js and tests/webui/test_board_run.py to OH-233 again, for its 2026-10-14 note (state() carries retired; the top bar's counter reads it); they come back when it lands.
 
 **Note 2026-10-15:** 2026-10-15: takes back webui/api.py, webui/static/emulator.js and tests/webui/test_board_run.py from OH-233 (done).
+
+**Note 2026-11-05:** 2026-11-05: lends core/cortexm0/abi.py to OH-64 for the Armv7E-M profile switch (cortexm0_set_profile, an ABI bump); they come back when it lands.
