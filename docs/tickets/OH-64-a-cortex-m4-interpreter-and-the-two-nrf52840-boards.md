@@ -1,7 +1,7 @@
 ---
 id: OH-64
 title: A Cortex-M4 interpreter and the two nRF52840 boards, which need an oracle first
-status: in-progress
+status: done
 priority: P2
 owner: oh-64-worktree
 created: '2026-08-26'
@@ -71,3 +71,5 @@ installed.
 **Note 2026-11-05:** Shape: the M4 is an Armv7E-M profile of core/cortexm0, with Thumb-2 in thumb2.cc, not a new core/cortexm4 tree. Cpu::map_field (cpu.h) is the one new memory-map primitive: a word whose bit 0 lives in another register's bit, which is what nRF52840 PIN_CNF.DIR is to DIR. The refusal test is test_what_the_interpreter_refuses_it_refuses_untouched. tests/webui/nrf52840/blink.bin sits beside test_nrf52840_board.py, which FIRMWARE_VERIFIED names. The on-board LEDs went into tools/import_pindefs.py's on_board so they land in HEADER, because api.level_keys reads HEADER only.
 
 **Note 2026-11-05:** Lent files, returned when OH-64 lands: abi.py and tests/webui/test_pin_view.py from OH-161; webui/boards/catalogue.py and tests/webui/test_board_catalogue.py from OH-210; tools/import_pindefs.py and tests/rules/test_import_pindefs.py from OH-172. Filed from this work: OH-270 (UDF on v6-M branches), OH-271 (FPU), OH-272 (refused Thumb-2 groups), OH-273 (nRF52840 peripherals for an SDK image), OH-274 (GPIO IN, PIN_CNF reset), OH-275 (Seeed LED polarity), OH-276 (test_import_pindefs on a partial fetch). Ids 254-269 were skipped because another session was filing into that range at the time.
+
+**Note 2026-11-06:** Landed on origin/master as e0a24a2bd65530402af27c9d347ef5c28028fd65.
