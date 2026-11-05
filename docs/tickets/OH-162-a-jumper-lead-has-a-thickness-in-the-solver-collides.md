@@ -2,7 +2,7 @@
 id: OH-162
 title: A jumper lead has a thickness in the solver, collides with other leads, and
   is checked against one photograph
-status: open
+status: in-progress
 priority: P2
 created: '2026-09-04'
 touches:
