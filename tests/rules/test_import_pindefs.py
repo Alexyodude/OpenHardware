@@ -1226,7 +1226,7 @@ def test_the_committed_modules_match_the_generator():
     gives at length."""
     _needs_the_fetched_packages()
     chips = pindefs.chips_with_header_markers()
-    assert chips == ["ESP32-C3", "ESP32-C5", "ESP32-C6", "RP2040", "RP2350"]
+    assert chips == ["ESP32-C3", "ESP32-C5", "ESP32-C6", "nRF52840", "RP2040", "RP2350"]
     for chip in chips:
         text = pindefs.module_path(chip).read_text(encoding="utf-8")
         start = text.find(pindefs.HEADER_BEGIN)
@@ -1305,10 +1305,11 @@ def test_the_board_file_and_the_module_agree_on_every_labelled_pad():
             if isinstance(header[key], int):
                 assert header[key] == pad["chip_index"], f"{name} {pad['label']}"
             checked.add(name)
-    # Three C3 files, two each of C5, C6, RP2040, RP2350 and SAMD21. A module
-    # added for another chip joins this check and moves the number, on
-    # purpose: the RP2350's moved it from 11 (OH-157).
-    assert len(checked) == 13, sorted(checked)
+    # Three C3 files, two each of C5, C6, nRF52840, RP2040, RP2350 and SAMD21.
+    # A module added for another chip joins this check and moves the number,
+    # on purpose: the RP2350's moved it from 11 (OH-157), and the nRF52840's
+    # from 13 (OH-64).
+    assert len(checked) == 15, sorted(checked)
 
 
 # --- the board nothing publishes, and the sentence it must not borrow --------

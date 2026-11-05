@@ -28,7 +28,7 @@ extern "C" {
 /// Bumped whenever this header's shape changes. Python refuses to run against
 /// a library that disagrees, which turns a silent struct mismatch into a clear
 /// failure at import.
-#define CORTEXM0_ABI_VERSION 14
+#define CORTEXM0_ABI_VERSION 15
 
 /// r0-r15, then the flags.
 ///
@@ -110,6 +110,13 @@ CORTEXM0_API void cortexm0_map_alias(CortexM0Cpu* cpu, uint32_t address,
 CORTEXM0_API void cortexm0_map_mirror(CortexM0Cpu* cpu, uint32_t address,
                                       uint32_t source, int invert, uint32_t mask);
 
+/// A register of its own whose bit 0 is bit `shift` of `target`'s word: the
+/// nRF52840's `PIN_CNF[n].DIR`, which the PS says is the same bit as the
+/// port's `DIR` bit n. A write stores the word and copies bit 0 across; a read
+/// answers the word with bit 0 taken from `target`. See cpu.h.
+CORTEXM0_API void cortexm0_map_field(CortexM0Cpu* cpu, uint32_t address,
+                                     uint32_t target, uint32_t shift);
+
 /// An address whose reads answer `value` and whose writes are ignored: a
 /// read-only status register. `cortexm0_map_mirror` cannot stand in, because a
 /// mirror reads from a source register and a constant has none.
@@ -172,6 +179,21 @@ CORTEXM0_API int cortexm0_step(CortexM0Cpu* cpu);
 /// instruction that was interrupted. Every step records it, at the cost of
 /// one store, so a caller need not read PC before each step to have it.
 CORTEXM0_API uint32_t cortexm0_step_entry(const CortexM0Cpu* cpu);
+
+/// The architecture profile `cortexm0_step` decodes for: 0 Armv6-M, the
+/// default and what `cortexm0_reset` restores, and 1 Armv7E-M (OH-64). Any
+/// other value is ignored rather than stored, so the profile is always one
+/// the core has. See `Profile` in cpu.h for why it is one core with a switch.
+CORTEXM0_API void cortexm0_set_profile(CortexM0Cpu* cpu, int profile);
+CORTEXM0_API int cortexm0_profile(const CortexM0Cpu* cpu);
+
+/// EPSR's IT[7:0]: zero outside an IT block. Readable so a test can see a
+/// block open and close, and writable so a caller that loads a register
+/// snapshot taken mid-block can restore it. Kept out of CortexM0Registers so
+/// that struct's shape, which every board and test already agrees on, stays
+/// as it is.
+CORTEXM0_API uint32_t cortexm0_itstate(const CortexM0Cpu* cpu);
+CORTEXM0_API void cortexm0_set_itstate(CortexM0Cpu* cpu, uint32_t itstate);
 
 /// The address of the most recent failed access, and whether it was a fetch.
 /// Only meaningful straight after a step returned 2. See cpu.h for why the

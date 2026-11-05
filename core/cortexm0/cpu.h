@@ -175,6 +175,29 @@ enum class StepResult : int {
     MemoryFault = 2,
 };
 
+/// Which architecture profile `step` decodes for (OH-64).
+///
+/// One core with a switch rather than a second core, because Armv7E-M is a
+/// strict superset of Armv6-M in everything this core models: the same
+/// registers, the same flags, the same exception entry and return, the same
+/// sixteen-bit encodings meaning the same things. What the wider profile adds
+/// is the rest of Thumb-2 -- the 32-bit data-processing, load/store, multiply
+/// and branch groups -- plus IT, CBZ and CBNZ among the narrow ones. A copy of
+/// the core would be a copy of every one of those shared paths, and the two
+/// would drift.
+///
+/// `V6M` is the default and what `reset` restores, so every board that never
+/// asks for the wider profile -- each one built before it existed -- decodes
+/// exactly as it did. A board selects `V7EM` in its `install`, after the
+/// reset that clears it.
+///
+/// The FPU and the DSP extension's saturating and SIMD groups are not part of
+/// either: an encoding from them is `Unimplemented` under both profiles.
+enum class Profile : int {
+    V6M = 0,
+    V7EM = 1,
+};
+
 class Cpu {
 public:
     Cpu();
@@ -209,6 +232,28 @@ public:
         set_n((result & 0x80000000u) != 0);
         set_z(result == 0);
     }
+
+    Profile profile() const { return profile_; }
+    void set_profile(Profile value) {
+        // A profile change drops any IT block in flight. ITSTATE has no
+        // meaning under Armv6-M, and carrying one across a switch would make
+        // the first instruction decoded under the new profile conditional on
+        // a block the old one opened.
+        profile_ = value;
+        itstate_ = 0;
+    }
+
+    /// The IT block in progress: EPSR's IT[7:0], in the architecture's own
+    /// packing -- the base condition in [7:5] and the mask in [4:0] -- so the
+    /// advance in `step` is ITAdvance() from the ARM ARM as written. Zero
+    /// outside a block, and always zero under Armv6-M.
+    ///
+    /// Kept apart from `apsr` on purpose. `set_apsr` masks to NZCV and its
+    /// callers -- the ABI's set_regs above all -- write the flags without
+    /// meaning to touch execution state, so folding IT into that word would
+    /// let a debugger's register write cancel an IT block.
+    uint8_t itstate() const { return itstate_; }
+    void set_itstate(uint8_t value) { itstate_ = value; }
 
     bool in_range(uint32_t address, uint32_t bytes) const;
 
@@ -303,6 +348,34 @@ public:
     /// and is not.
     void map_mirror(uint32_t address, uint32_t source, bool invert,
                     uint32_t mask = 0xFFFFFFFFu);
+
+    /// A register of its own whose bit 0 IS bit `shift` of another register.
+    ///
+    /// The nRF52840's `PIN_CNF[n]` is the case that asked for it. Its bit 0 is
+    /// `DIR`, and the product specification (nRF52840 PS v1.7, 6.9.2) says the
+    /// port's `DIR` register bit n "is the same as" it: one bit, two
+    /// addresses. Nordic's HAL configures an output through `PIN_CNF`, and
+    /// `DIRSET`/`DIRCLR` change the same bit from the other side, so each view
+    /// has to see what the other wrote.
+    ///
+    /// **Neither existing behaviour can say this.** A mirror's write is inert
+    /// and an alias holds no bits of its own, and `PIN_CNF` is both: its other
+    /// fields -- INPUT, PULL, DRIVE, SENSE -- are its own storage, and its bit
+    /// 0 is somebody else's. Modelling it as a plain register and having the
+    /// board OR the two together when it reads a pin was the alternative, and
+    /// it answers wrongly: a `DIRCLR` after a `PIN_CNF` write leaves the pin an
+    /// input on the part and an output in that model.
+    ///
+    /// So a write stores the word and copies its bit 0 into the target's bit
+    /// `shift`, and a read answers the stored word with bit 0 replaced by the
+    /// target's. The bit is held in exactly one place, the target, and the
+    /// copy in this entry's own word is never read -- the shape that cannot
+    /// drift. A write whose byte mask misses byte 0 (`STRB` to byte 1) leaves
+    /// the target alone, because it did not address the bit.
+    ///
+    /// One bit, at bit 0, because that is what the case is. A general
+    /// field-to-field map would be a parameter nothing passes.
+    void map_field(uint32_t address, uint32_t target, uint32_t shift);
 
     /// A register whose reads answer `value` and whose writes are ignored.
     ///
@@ -502,6 +575,8 @@ private:
 
     std::array<uint32_t, 16> regs_{};
     uint32_t apsr_ = 0;
+    Profile profile_ = Profile::V6M;
+    uint8_t itstate_ = 0;
     /// Every region there is. A vector rather than a map because there are a
     /// handful and every access scans them; a hash lookup per byte would cost
     /// more than the scan saves.
@@ -555,6 +630,11 @@ private:
         /// for it the difference is observable.
         bool writable = true;
         uint32_t mask = 0xFFFFFFFFu;
+        /// `map_field`: whether this word's bit 0 lives in `target`'s bit
+        /// `shift` rather than here. `target` is the word's own address
+        /// otherwise, so a plain register is unchanged by the field.
+        bool field = false;
+        uint32_t shift = 0;
     };
 
     /// A `map_stream` address: what gates it, and what has been written.

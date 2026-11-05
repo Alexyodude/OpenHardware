@@ -25,6 +25,13 @@ touches:
 - tests/webui/test_board_catalogue.py
 - tests/webui/test_nrf52840_board.py
 - docs/architectures.md
+- core/cortexm0/thumb2.h
+- tests/webui/nrf52840/*
+- tests/rules/test_import_pindefs.py
+- tools/import_pindefs.py
+- webui/boards/XIAO-nRF52840-DIP.json
+- webui/boards/XIAO-nRF52840-SMD.json
+- tests/webui/test_pin_view.py
 ---
 
 TWO OF THE FOURTEEN BOARDS THAT DO NOT RUN. XIAO-nRF52840-DIP and -SMD, chip nRF52840, core cortexm4. This is OH-50's residual, filed because OH-50 closed on its second Done-when and left the interpreter with no ticket of its own.
@@ -58,3 +65,9 @@ execution oracle here, and QEMU alone would be a single source even if it were
 installed.
 
 **Note 2026-11-05:** Oracle found 2026-11-05: Unicorn 2.1.4 (QEMU lineage) and icicle-emu 0.0.11 (Rust, Ghidra SLEIGH lineage) both run thumbv7em and pip-install on Python 3.14. Two independent implementations, so 'not QEMU alone' is met. Both are TOOL dependencies (the cadquery-ocp precedent): tools/m4_oracle.py runs each case under both, keeps only agreement, and the vectors and traces are committed under tests/cortexm0/m4/ so the test cannot skip. Claims re-added on exec.cc and cpu.h as this ticket said to; abi.py lent by OH-161, catalogue.py and its test by OH-210.
+
+**Note 2026-11-05:** Lockstep findings, each recorded where it is enforced: icicle-emu 0.0.11 keeps C on a rotated modified-immediate constant where the manual (and Unicorn) set it to bit 31, so the vectors keep only cases where the two agree and a hand-written test holds the rule (thumb2.cc, expand_immediate). Encodings the architecture calls UNPREDICTABLE are filtered out of the vectors rather than matched, since two emulators agreeing on one is no evidence (tools/m4_oracle.py). Unicorn does not count an IT as an instruction, so IT-block cases run it to an end address (m4_oracle.py's header). A pending exception is held until an IT block ends, because this core stacks only NZCV and not ITSTATE (exec.cc, before ServicePending). No alignment checks, as on the V6M core; LDM/STM/LDRD/STRD unaligned would UsageFault on silicon and do not here (thumb2.cc).
+
+**Note 2026-11-05:** Shape: the M4 is an Armv7E-M profile of core/cortexm0, with Thumb-2 in thumb2.cc, not a new core/cortexm4 tree. Cpu::map_field (cpu.h) is the one new memory-map primitive: a word whose bit 0 lives in another register's bit, which is what nRF52840 PIN_CNF.DIR is to DIR. The refusal test is test_what_the_interpreter_refuses_it_refuses_untouched. tests/webui/nrf52840/blink.bin sits beside test_nrf52840_board.py, which FIRMWARE_VERIFIED names. The on-board LEDs went into tools/import_pindefs.py's on_board so they land in HEADER, because api.level_keys reads HEADER only.
+
+**Note 2026-11-05:** Lent files, returned when OH-64 lands: abi.py and tests/webui/test_pin_view.py from OH-161; webui/boards/catalogue.py and tests/webui/test_board_catalogue.py from OH-210; tools/import_pindefs.py and tests/rules/test_import_pindefs.py from OH-172. Filed from this work: OH-270 (UDF on v6-M branches), OH-271 (FPU), OH-272 (refused Thumb-2 groups), OH-273 (nRF52840 peripherals for an SDK image), OH-274 (GPIO IN, PIN_CNF reset), OH-275 (Seeed LED polarity), OH-276 (test_import_pindefs on a partial fetch). Ids 254-269 were skipped because another session was filing into that range at the time.

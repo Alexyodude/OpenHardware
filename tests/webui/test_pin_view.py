@@ -815,12 +815,14 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
             pad["state"] == "unknown" and pad["modelled"]
             for pad in view["pads"])
     )
+    # The two XIAO-nRF52840 boards left this list when OH-64 gave them
+    # `webui/boards/nrf52840.py`: a pad with a `chip_pin` is now read.
     silent = sorted(set(boards) - set(would_have_lied))
     assert silent == [
         "XIAO-ESP32-S3-DIP", "XIAO-ESP32-S3-SMD", "XIAO-ESP32-S3-SMD_PAD",
         "XIAO-MG24-DIP", "XIAO-MG24-SMD", "XIAO-STM32C5-SMD",
-        "XIAO-nRF52840-DIP", "XIAO-nRF52840-SMD", "XIAO-nRF54LM20A-DIP",
-        "XIAO-nRF54LM20A-SMD", "XIAO-nRF54l15-DIP", "XIAO-nRF54l15-SMD",
+        "XIAO-nRF54LM20A-DIP", "XIAO-nRF54LM20A-SMD", "XIAO-nRF54l15-DIP",
+        "XIAO-nRF54l15-SMD",
     ], silent
     assert "Arduino Uno" in would_have_lied
     assert "XIAO-MG24-SMD" in silent, (
@@ -926,8 +928,9 @@ def test_a_running_board_whose_module_reads_no_pins_still_says_one_is_running():
         }
         if module is not None and getattr(module, "PIN_NAMES", None)
     )
+    # `nrf52840` since OH-64, which publishes names and reads them.
     assert with_names == ["atmega328p", "esp32c3", "esp32c5", "esp32c6",
-                          "rp2040", "rp2350", "samd21"], with_names
+                          "nrf52840", "rp2040", "rp2350", "samd21"], with_names
     assert all(
         hasattr(api.description_for(board), "pin_states")
         for board in catalogue.board_names()

@@ -10,27 +10,27 @@
 # actually executes. Checked against `arm-none-eabi-objdump` over 172,032 wide
 # encodings, 1,260 `IT`-block renderings and a real compiled image.
 #
-# **Not built: the interpreter.** Nothing here executes an Armv7E-M
-# instruction, and that is a decision with a reason rather than a gap. QEMU is
-# not installed on this machine — verified 2026-08-25 — so there is no way to
-# lockstep a Thumb-2 interpreter against anything. `docs/architectures.md`
-# records that even where QEMU exists it is a *single* oracle for cortex-m4,
-# with no independent second source, so a disagreement could be detected and
-# not adjudicated.
+# **Not built: the interpreter.** Nothing in OH-50 executed an Armv7E-M
+# instruction, and that was a decision with a reason rather than a gap: there
+# was no oracle to lockstep a Thumb-2 interpreter against, and QEMU alone would
+# have been a *single* source for cortex-m4 -- a disagreement detected and not
+# adjudicated. A Thumb-2 interpreter verified only by tests written by whoever
+# wrote the interpreter is the kind of evidence this repository declines to
+# produce.
 #
-# A Thumb-2 interpreter verified only by tests written by whoever wrote the
-# interpreter is the kind of evidence this repository declines to produce, and
-# `rules/board-claims.md` exists because that declining has to be structural.
-# So the decode half — which has a real, independent oracle — was taken as far
-# as it goes, and the execution half was left with the reason written down.
+# **OH-64 built it**, once two independent oracles existed: Unicorn and
+# icicle-emu, which `tools/m4_oracle.py` runs side by side.
+# `test_thumb2_exec.py` holds the interpreter to what they agree on. It runs
+# only under `Profile::V7EM`, which a board has to ask for.
 #
-# ## Why that is safe to ship
+# ## Why the Armv6-M profile still refuses
 #
-# `test_the_interpreter_refuses_every_thumb2_prefix` is the load-bearing one.
-# `core/cortexm0/exec.cc` answers `StepResult::Unimplemented` — processor
-# completely untouched — for every 32-bit encoding, so a Cortex-M4 image loaded
-# onto a board today stops on its first wide instruction and says which one.
-# It does not execute half of it and it does not decode it as something else.
+# `test_the_armv6m_profile_refuses_every_thumb2_prefix` is what keeps that
+# opt-in honest. Under the default profile `core/cortexm0/exec.cc` answers
+# `StepResult::Unimplemented` -- processor completely untouched -- for every
+# 32-bit encoding but BL, because an Armv6-M part has none of them and an
+# Armv6-M image containing one has gone wrong. It does not execute half of it
+# and it does not decode it as something else.
 #
 # ## And why the sweeps live in tools/
 #
@@ -59,8 +59,7 @@ PROBE_BASE = 0x00010000
 
 #: Every 32-bit Thumb-2 prefix group, one representative each, as
 #: `(first halfword, second halfword)`. Used by the test that pins the
-#: interpreter's refusal, so a future Thumb-2 interpreter has to update a test
-#: whose name says what it is protecting.
+#: Armv6-M profile's refusal of all of them.
 PREFIXES = {
     "0xE8 load/store multiple": (0xE8B0, 0x0006),
     "0xE9 load/store dual": (0xE9C0, 0x1200),
@@ -327,13 +326,13 @@ def test_pop_decodes_on_both_profiles():
         assert disasm.decode(0xB570, 0, None, profile)[0] == "push\t{r4, r5, r6, lr}"
 
 
-# --- what makes shipping a decoder with no interpreter honest ---------------
+# --- what keeps the Armv6-M profile Armv6-M -------------------------------
 
 
-def test_the_interpreter_refuses_every_thumb2_prefix():
-    """The reason a decoder without an interpreter is safe to ship.
+def test_the_armv6m_profile_refuses_every_thumb2_prefix():
+    """Every board that has not asked for Armv7E-M gets Armv6-M.
 
-    `core/cortexm0/exec.cc` implements Armv6-M. Every Thumb-2 encoding must
+    A fresh core decodes as Armv6-M. Every Thumb-2 encoding must
     come back as `Unimplemented` with the **processor completely untouched** —
     not executed, not partially executed, and not decoded as some 16-bit
     instruction that happens to share bits.
@@ -342,9 +341,9 @@ def test_the_interpreter_refuses_every_thumb2_prefix():
     halfword on both parts, and an interpreter that read it as Armv6-M would
     step two bytes into the middle of a 32-bit instruction and carry on.
 
-    **When someone writes the Thumb-2 interpreter this test fails**, which is
-    intended: it is the list of things that have to start working, and its
-    name says what it is protecting.
+    This test used to say it would fail the day the Thumb-2 interpreter was
+    written. It did not have to: the interpreter is behind a profile, and this
+    is the profile's half of that contract.
     """
     abi = pytest.importorskip("core.cortexm0.abi")
     ram, entry = 0x20000000, 0x20000100

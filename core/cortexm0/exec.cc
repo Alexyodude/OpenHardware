@@ -45,9 +45,9 @@
 
 #include "exception.h"
 #include "shift.h"
+#include "thumb2.h"
 
 namespace cortexm0 {
-namespace {
 
 /// A write to PC that might be an exception return rather than a branch.
 ///
@@ -65,6 +65,8 @@ StepResult write_pc_or_return(Cpu& cpu, uint32_t value) {
     cpu.set_reg(kPc, value & ~1u);
     return StepResult::Ok;
 }
+
+namespace {
 
 /// Low three bits at `position`. Formats 1-4 address only r0-r7.
 inline unsigned reg3(uint16_t encoding, unsigned position) {
@@ -191,6 +193,8 @@ inline uint32_t sign_extend(uint32_t value, unsigned bits) {
     return (value ^ mask) - mask;
 }
 
+}  // namespace
+
 bool condition_holds(const Cpu& cpu, unsigned code) {
     switch (code) {
         case 0x0: return cpu.z();                              // EQ
@@ -210,6 +214,8 @@ bool condition_holds(const Cpu& cpu, unsigned code) {
         default: return true;                                  // AL
     }
 }
+
+namespace {
 
 /// Write a register, treating r15 as a branch.
 ///
@@ -683,6 +689,134 @@ StepResult execute_wide(Cpu& cpu, uint16_t first, uint32_t address) {
     return StepResult::Ok;
 }
 
+// --- Armv7E-M: IT, CBZ and CBNZ, and the 32-bit encodings (OH-64) -----------
+
+/// `ITAdvance()`, DDI0403 A7.3.3, as written: the mask shifts up one place
+/// under a fixed base condition, and the block is over when the mask's
+/// trailing one has shifted out of [2:0].
+uint8_t advance_it(uint8_t it) {
+    if ((it & 0x7u) == 0) {
+        return 0;
+    }
+    return static_cast<uint8_t>((it & 0xE0u) | ((it << 1) & 0x1Fu));
+}
+
+/// The narrow encodings that set flags inside an IT block as well as out of
+/// it. Every other flag-setter below 0x4400 is its `S` form outside a block
+/// and its plain form inside one -- `ADDS` becomes `ADD` -- which is how
+/// Thumb-2 spent no bit on `S` in sixteen-bit space. The compares have no
+/// plain form to become, so they keep setting flags.
+bool sets_flags_in_it(uint16_t encoding) {
+    if ((encoding >> 11) == 0x5u) {
+        return true;                                    // CMP Rn, #imm8
+    }
+    const uint16_t alu = encoding & 0xFFC0u;
+    return alu == 0x4200u || alu == 0x4280u || alu == 0x42C0u;  // TST, CMP, CMN
+}
+
+/// Is `encoding` the first halfword of a 32-bit instruction? Under Armv7-M
+/// that is any of the prefixes 0b11101, 0b11110 and 0b11111 -- the same test
+/// `disasm.is_wide` makes. 0b11100 is the narrow unconditional `B`.
+bool is_wide_v7(uint16_t encoding) {
+    return (encoding & 0xE000u) == 0xE000u && (encoding & 0x1800u) != 0;
+}
+
+/// One instruction under Armv7E-M, PC already advanced past it.
+///
+/// What is UNPREDICTABLE inside an IT block is refused before the condition
+/// is asked, so whether such a program stops does not depend on its flags:
+/// a nested IT, CBZ and CBNZ, any conditional branch, and an unconditional
+/// one anywhere but last. The vectors hold none of them, because
+/// `tools/m4_oracle.py` never generates one, and nothing here can say what
+/// silicon does with them.
+StepResult execute_v7em(Cpu& cpu, uint16_t encoding, uint16_t second,
+                        uint32_t address, bool wide) {
+    const uint8_t it = cpu.itstate();
+    const bool in_it = it != 0;
+    const bool last_in_it = (it & 0xFu) == 0x8u;
+
+    const bool is_it = !wide && (encoding & 0xFF00u) == 0xBF00u && (encoding & 0xFu) != 0;
+    const bool is_cbz = !wide && (encoding & 0xF500u) == 0xB100u;
+    if (!wide) {
+        const bool is_bcond =
+            (encoding & 0xF000u) == 0xD000u && ((encoding >> 8) & 0xFu) < 0xEu;
+        const bool is_b = (encoding & 0xF800u) == 0xE000u;
+        const bool is_bx = (encoding & 0xFF00u) == 0x4700u;
+        if (in_it && (is_it || is_cbz || is_bcond || ((is_b || is_bx) && !last_in_it))) {
+            return StepResult::Unimplemented;
+        }
+        // UDF, 0xDE00-0xDEFF: permanently undefined, and refused. Under
+        // Armv6-M this core still runs it as a branch on condition 0xE, which
+        // is a bug with a ticket of its own rather than a fix made here.
+        if ((encoding & 0xFF00u) == 0xDE00u) {
+            return StepResult::Unimplemented;
+        }
+    }
+
+    if (in_it && !condition_holds(cpu, it >> 4)) {
+        // Skipped, which is an instruction executed as a NOP: PC has already
+        // moved past it, and the block moves on.
+        cpu.set_itstate(advance_it(it));
+        return StepResult::Ok;
+    }
+
+    if (wide) {
+        const StepResult result =
+            execute_thumb2(cpu, encoding, second, address, in_it, last_in_it);
+        if (result == StepResult::Ok && in_it) {
+            cpu.set_itstate(advance_it(it));
+        }
+        return result;
+    }
+
+    if (is_it) {
+        // IT. The block starts with the *next* instruction, so ITSTATE is
+        // loaded and not advanced. A first condition of 0xF is UNPREDICTABLE,
+        // and so is AL with an else in the mask: AL has no inverse.
+        const unsigned firstcond = (encoding >> 4) & 0xFu;
+        const unsigned mask = encoding & 0xFu;
+        if (firstcond == 0xFu || (firstcond == 0xEu && (mask & (mask - 1u)) != 0)) {
+            return StepResult::Unimplemented;
+        }
+        cpu.set_itstate(static_cast<uint8_t>(encoding & 0xFFu));
+        return StepResult::Ok;
+    }
+
+    if (is_cbz) {
+        // CBZ and CBNZ. The offset is i:imm5:'0', forward only, from the
+        // instruction's address plus four -- and they never touch the flags,
+        // which is the whole point of them.
+        const unsigned rn = encoding & 0x7u;
+        const uint32_t offset =
+            (((encoding >> 9) & 1u) << 6) | (((encoding >> 3) & 0x1Fu) << 1);
+        const bool nonzero = (encoding & 0x0800u) != 0;
+        if ((cpu.reg(rn) != 0) == nonzero) {
+            cpu.set_reg(kPc, address + 4 + offset);
+        }
+        return StepResult::Ok;
+    }
+
+    // Everything else narrow means what it means under Armv6-M, so it runs
+    // through the same code -- except that inside an IT block the `S` forms
+    // below 0x4400 do not set flags. Restoring the word afterwards, rather
+    // than threading a flag through every case, is what keeps the Armv6-M
+    // paths byte for byte as they were.
+    const bool suppress = in_it && encoding < 0x4400u && !sets_flags_in_it(encoding);
+    const uint32_t flags = cpu.apsr();
+    const StepResult result =
+        encoding < 0x4400u ? execute(cpu, encoding) : execute_rest(cpu, encoding, address);
+    if (result != StepResult::Ok) {
+        return result;
+    }
+    if (suppress) {
+        cpu.set_apsr(flags);
+    }
+    if (in_it) {
+        cpu.set_itstate(advance_it(it));
+    }
+    return StepResult::Ok;
+}
+
 }  // namespace
 
 StepResult step(Cpu& cpu) {
@@ -696,7 +830,16 @@ StepResult step(Cpu& cpu) {
     //
     // The step costs one instruction of virtual time and executes none. That
     // is not free on real silicon either: entry stacks eight words.
-    if (ServicePending(cpu)) {
+    //
+    // **And not inside an IT block** (OH-64). The architecture does take one
+    // there -- it stacks ITSTATE in the frame's xPSR and restores it on
+    // return -- but this core stacks only NZCV, so a handler entered
+    // mid-block would return to the rest of the block with its conditions
+    // forgotten and run instructions the block said to skip. Holding the
+    // exception until the block ends costs at most four instructions of
+    // latency, and it changes nothing under Armv6-M, where ITSTATE is always
+    // zero.
+    if (cpu.itstate() == 0 && ServicePending(cpu)) {
         return StepResult::Ok;
     }
 
@@ -710,9 +853,20 @@ StepResult step(Cpu& cpu) {
         return StepResult::MemoryFault;
     }
 
-    // BL is the only 32-bit encoding on this part, and it is recognised before
-    // anything else so its second halfword is never decoded on its own.
-    const bool wide = (encoding & 0xF800u) == 0xF000u;
+    // Under Armv6-M BL is the only 32-bit encoding, and it is recognised
+    // before anything else so its second halfword is never decoded on its own.
+    // Under Armv7E-M every 32-bit encoding is, and its second halfword is
+    // fetched here under the same executability check as the first: an
+    // instruction straddling the end of flash faults on the half that is not
+    // there, naming that half's address.
+    const bool v7em = cpu.profile() == Profile::V7EM;
+    const bool wide = v7em ? is_wide_v7(encoding) : (encoding & 0xF800u) == 0xF000u;
+    uint16_t second = 0;
+    if (v7em && wide &&
+        (!cpu.read_halfword(address + 2, second) || !cpu.executable_at(address + 2))) {
+        cpu.note_fetch_fault(address + 2);
+        return StepResult::MemoryFault;
+    }
 
     // **PC advances first, and a branch overwrites it.**
     //
@@ -732,9 +886,10 @@ StepResult step(Cpu& cpu) {
     cpu.set_reg(kPc, next);
 
     const StepResult result =
-        wide ? execute_wide(cpu, encoding, address)
-             : (encoding < 0x4400u ? execute(cpu, encoding)
-                                   : execute_rest(cpu, encoding, address));
+        v7em   ? execute_v7em(cpu, encoding, second, address, wide)
+        : wide ? execute_wide(cpu, encoding, address)
+               : (encoding < 0x4400u ? execute(cpu, encoding)
+                                     : execute_rest(cpu, encoding, address));
     if (result != StepResult::Ok) {
         // Put PC back, so an unimplemented encoding or a faulting access
         // leaves it naming the instruction that stopped -- the contract in

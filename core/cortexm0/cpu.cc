@@ -40,6 +40,11 @@ Cpu::Cpu() = default;
 void Cpu::reset() {
     regs_.fill(0);
     apsr_ = 0;
+    // Back to Armv6-M, the profile every board before OH-64 was written for,
+    // so a reset machine decodes as one of them until its board says
+    // otherwise. ITSTATE goes with it: a reset core is outside any IT block.
+    profile_ = Profile::V6M;
+    itstate_ = 0;
     clear_memory();
     // Power-on, so the whole board goes: both the peripherals and the memory
     // map. Clearing only one leaves a machine with RAM and no registers, or
@@ -274,6 +279,18 @@ void Cpu::map_mirror(uint32_t address, uint32_t source, bool invert, uint32_t ma
     mmio_[at] = entry;
 }
 
+void Cpu::map_field(uint32_t address, uint32_t target, uint32_t shift) {
+    const uint32_t at = address & ~3u;
+    Mapped entry;
+    // `source` is the word itself, so a read starts from this entry's own
+    // fields; `target` is where bit 0 lives. See `map_field` in cpu.h.
+    entry.target = target & ~3u;
+    entry.source = at;
+    entry.field = true;
+    entry.shift = shift & 31u;
+    mmio_[at] = entry;
+}
+
 void Cpu::map_constant(uint32_t address, uint32_t value) {
     const uint32_t at = address & ~3u;
     Mapped entry;
@@ -380,6 +397,16 @@ bool Cpu::mmio_read(uint32_t address, uint32_t& out) const {
         }
         value = origin->second.value;
     }
+    if (entry.field) {
+        const auto owner = mmio_.find(entry.target);
+        if (owner == mmio_.end()) {
+            // A field whose register was never mapped: a board description
+            // mistake, faulted for the reason the mirror's is above.
+            note_fault(address, false);
+            return false;
+        }
+        value = (value & ~1u) | ((owner->second.value >> entry.shift) & 1u);
+    }
     if (entry.invert) {
         value = ~value;
     }
@@ -429,6 +456,20 @@ bool Cpu::mmio_write(uint32_t address, uint32_t value, uint32_t byte_mask) {
     if (target == mmio_.end()) {
         note_fault(address, false);
         return false;
+    }
+    if (entry.field) {
+        // The word keeps its own fields and the bit goes to its owner. A write
+        // that did not address byte 0 did not address the bit, so the owner is
+        // left alone -- a `STRB` to `PIN_CNF`'s PULL byte must not turn a pin
+        // into an input.
+        uint32_t& own = found->second.value;
+        own = (own & ~byte_mask) | (value & byte_mask);
+        if ((byte_mask & 1u) != 0) {
+            const uint32_t bit = 1u << entry.shift;
+            uint32_t& owned = target->second.value;
+            owned = (value & 1u) != 0 ? (owned | bit) : (owned & ~bit);
+        }
+        return true;
     }
     // `value` always arrives already confined to `byte_mask`: the sub-word
     // accessors shift the byte or halfword into place and leave the rest zero,

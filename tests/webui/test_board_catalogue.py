@@ -405,10 +405,23 @@ def test_only_the_board_a_real_image_ran_on_claims_to_have_run_one():
     RP2040 does not have -- onto the XIAO by name and watches the pad the
     board file gives `D3`'s GPIO alternate. It is evidence for the Hazard3
     half only; the Cortex-M33 half is OH-36's.
+
+    nRF52840 joined on 2026-11-05 under OH-64, and the argument it had to
+    survive is that two Cortex-M0+ chips already ran here and the M4 runs
+    every Thumb-16 encoding they do. That is the M0+'s instruction set, not
+    the M4's: an Armv6-M image never reaches a wide encoding, an IT block or
+    the M4's flag rules for them, which are what OH-64 built and what Unicorn
+    and icicle were made to agree on first. It is here because
+    `tests/webui/test_nrf52840_board.py` loads its own `blink.bin` -- built
+    for Armv7E-M, walking a table so the compiler reaches for wide loads and
+    a `bl` -- onto each XIAO by name and watches P0.26, P0.30 and P0.06 take
+    turns, through `PIN_CNF` as Nordic's own HAL writes it. It is evidence
+    for the integer core only: the FPU is refused, and no vendor SDK image
+    has run.
     """
     proven = {b.chip for b in catalogue.catalogue() if b.firmware_verified}
     assert proven == {"RP2040", "SAMD21", "ATmega328P", "ESP32-C3",
-                      "ESP32-C6", "ESP32-C5", "RP2350"}
+                      "ESP32-C6", "ESP32-C5", "RP2350", "nRF52840"}
 
 
 def test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence():

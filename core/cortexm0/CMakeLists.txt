@@ -7,6 +7,7 @@ add_library(cortexm0 SHARED
   cpu.cc
   shift.cc
   exec.cc
+  thumb2.cc
   exception.cc
   abi.cc
 )

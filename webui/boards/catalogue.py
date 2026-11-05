@@ -99,7 +99,15 @@ CHIPS: dict[str, tuple[str, str]] = {
     "MG24": ("Armv8-M (Cortex-M33)", "cortexm33"),
     "nRF54l15": ("Armv8-M (Cortex-M33)", "cortexm33"),
     "nRF54LM20A": ("Armv8-M (Cortex-M33)", "cortexm33"),
-    "nRF52840": ("Armv7E-M (Cortex-M4F)", "cortexm4"),
+    # **The core is `cortexm0`, and that is not a typo for `cortexm4`.** This
+    # row named a `cortexm4` directory until OH-64, which built the Armv7E-M
+    # interpreter as a second profile of the one Cortex-M core rather than a
+    # second core: an M4's instruction set contains every M0+ encoding, and
+    # two copies of the narrow half would be two things to keep right.
+    # `webui/boards/nrf52840.py` selects the profile. The ISA string keeps
+    # the F because the silicon has an FPU; the core does not model it, and
+    # an image that uses it stops at its first VFP instruction and names it.
+    "nRF52840": ("Armv7E-M (Cortex-M4F)", "cortexm0"),
     "ESP32-C3": ("RV32IMC", "riscv32"),
     "ESP32-C5": ("RV32IMAC + Zcb/Zcmp/Zcmt", "riscv32"),
     "ESP32-C6": ("RV32IMAC", "riscv32"),
@@ -213,6 +221,16 @@ CORE_ISA: dict[str, str] = {
 #: through the pin view, after the image has selected SIO and opened the
 #: pad's isolation latch. That is the Hazard3 half. The Cortex-M33 half, which
 #: a real RP2350 boots by default, has no core here and is OH-36's.
+#:
+#: The nRF52840 entry is the first Armv7E-M one, and the first whose image was
+#: run under two other implementations before this one ran it.
+#: `tests/webui/test_nrf52840_board.py` loads `tests/webui/nrf52840/blink.bin`
+#: onto both XIAO nRF52840 boards by name, steps it on `core/cortexm0` in its
+#: Armv7E-M profile, and watches the three LED pins go low and high in turn
+#: through the pin view, every header pad staying an input. The same image's
+#: instruction-by-instruction trace is what `tools/m4_oracle.py` recorded from
+#: Unicorn and icicle-emu where they agree, and
+#: `tests/cortexm0/test_thumb2_exec.py` holds the core to it.
 FIRMWARE_VERIFIED: dict[str, str] = {
     "RP2040": "tests/cortexm0/test_blink.py",
     "SAMD21": "tests/cortexm0/test_samd21_blink.py",
@@ -221,6 +239,7 @@ FIRMWARE_VERIFIED: dict[str, str] = {
     "ESP32-C6": "tests/riscv32/test_esp32c6_board.py",
     "ESP32-C5": "tests/riscv32/test_esp32c5_board.py",
     "RP2350": "tests/webui/test_xiao_rp2350_board.py",
+    "nRF52840": "tests/webui/test_nrf52840_board.py",
 }
 
 #: A row of `tools/board_manifest.py` to the test that compiled a sketch for
@@ -251,16 +270,15 @@ BOARD_FIRMWARE_VERIFIED: dict[str, str] = {
 #: Ordering the backlog needs this: "how many boards" says what to build first,
 #: and this says what it would cost.
 ORACLES: dict[str, str] = {
-    "cortexm0": "rp2040js (MIT, hand-written from DDI0419) -- in use here",
+    "cortexm0": "rp2040js (MIT, hand-written from DDI0419) -- in use here for "
+                "Armv6-M; for the Armv7E-M profile, Unicorn 2.1.4 (QEMU lineage) "
+                "and icicle-emu 0.0.11 (Ghidra SLEIGH lineage) in lockstep, only "
+                "their agreement kept (tools/m4_oracle.py, OH-64)",
     "cortexm33": "none free that models Armv8-M security extensions; QEMU has m33 "
                  "but not the RP2350's Hazard3 half. A prebuilt Windows QEMU exists "
                  "(qemu.weilnetz.de, checked 2026-09-04, not installed), so its "
                  "absence is not what blocks this; being a single source is "
                  "(docs/architectures.md 4.6)",
-    "cortexm4": "QEMU has cortex-m4; no independent second source, so a "
-                "disagreement could not be adjudicated. The same prebuilt Windows "
-                "QEMU applies here (docs/architectures.md 4.6): obtainable, not "
-                "installed, and single-source either way",
     "riscv32": "Hazard3's rvcpp (Apache-2.0) builds here, but has no extension "
                "gating at all -- right on the legal space, wrong at the "
                "illegal-instruction edge",

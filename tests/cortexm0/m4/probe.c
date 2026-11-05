@@ -1,4 +1,4 @@
-/* OpenHardware - a Cortex-M4 image that exists to be read, not to be run.
+/* OpenHardware - a Cortex-M4 image written to be read, and now run.
  *
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2026 the OpenHardware authors. See LICENSE.
@@ -7,16 +7,16 @@
  *
  * Every other compiled fixture in this repository is a program that *runs*:
  * `tests/cortexm0/blink/blink.c` toggles a pin, `tests/riscv32/c6blink/blink.c`
- * drives GPIO8, and a test watches each of them execute. **Nothing executes
- * this one.** `core/cortexm0/exec.cc` implements Armv6-M and answers
- * `StepResult::Unimplemented` -- processor completely untouched -- for every
- * Thumb-2 encoding, so a Cortex-M4 image stops on its first wide instruction.
- * OH-50 records why that is where the work stopped: there is no execution
- * oracle on this machine, QEMU is not installed, and a Thumb-2 interpreter
- * verified only against tests written by the same author is the kind of
- * evidence this repository declines to produce.
+ * drives GPIO8, and a test watches each of them execute. This one was
+ * written, in OH-50, when nothing could execute it: there was no Armv7E-M
+ * execution oracle, and a Thumb-2 interpreter verified only against tests
+ * written by the same author is the kind of evidence this repository declines
+ * to produce. OH-64 found two oracles, and `tools/m4_oracle.py` now traces this
+ * image from `_start` under both; `test_thumb2_exec.py` holds the interpreter
+ * to that trace. It does nothing visible -- no pin, no board -- so it is a
+ * conformance input and not firmware.
  *
- * What there *is* an oracle for is the decode, and this file is its subject.
+ * What it was first written for is the decode.
  * `tests/cortexm0/test_thumb2_disasm.py` disassembles the committed binary
  * with `core/cortexm0/disasm.py` and with `arm-none-eabi-objdump`, and every
  * line must match.

@@ -3,14 +3,16 @@
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2026 the OpenHardware authors. See LICENSE.
  *
- * `_start` first, the same reason `tests/riscv32/c6blink/blink.ld` gives:
- * without a script the linker orders sections however it likes, and a fixture
- * whose bytes move when the compiler feels like it is a fixture that cannot be
- * committed and compared.
+ * `.text.start` first, the same reason `tests/riscv32/c6blink/blink.ld`
+ * gives: without a script the linker orders sections however it likes, and a
+ * fixture whose bytes move when the compiler feels like it is a fixture that
+ * cannot be committed and compared.
  *
- * **This one is never entered**, so the ordering is about reproducibility
- * rather than about correctness -- nothing executes a Cortex-M4 image here.
- * See `probe.c`.
+ * `_start` itself is NOT first: without `-ffunction-sections` GCC puts it in
+ * plain `.text`, after the functions it calls. That did not matter while the
+ * image was only disassembled; since OH-64 traces it from `_start`,
+ * `tools/m4_oracle.py` pins the address as `PROBE_ENTRY` and checks a `push`
+ * is there, so a rebuild that moved it fails loudly.
  *
  * 0x00010000 is nRF52840 flash, which starts at zero; the offset leaves room
  * for the vector table a real image would put there and keeps every branch

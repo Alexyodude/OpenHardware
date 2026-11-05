@@ -685,6 +685,24 @@ disagreement and cannot adjudicate one. `ORACLES` in
 `missing_cores()` shows a reader, and a stale entry there is what makes a
 board look deader than it is.
 
+**For Armv7E-M the objection is met, by a pair §2.1c does not retire**
+(OH-64, 2026-11-05). [V] Unicorn 2.1.4 is QEMU's TCG, as §2.1c says, so it
+stands in for QEMU here rather than corroborating it. The second opinion is
+icicle-emu 0.0.11, which executes Ghidra's SLEIGH specification of the ISA
+and shares no code with QEMU: the ancestor check in §2.1c comes back with two
+different ancestors. Both pip-install on this machine's Python and both run
+`thumbv7em`. `tools/m4_oracle.py` runs every generated case and every
+compiled image under each, keeps only what they agree on, and records why
+the rest was dropped. Where each emulator departs from the part, and how the
+tool runs it so the departure cannot reach a fixture, is listed in that
+tool's own header. Both emulators are **tool**
+dependencies, on the `cadquery-ocp` precedent: what they produce is committed
+under `tests/cortexm0/m4/`, so the core's test reads fixtures and never skips
+for want of an emulator. Agreement between two software models is still not
+silicon. Where both share a misreading of DDI0403 the pair cannot see it, and
+a capture from a real nRF52840 would outrank both, as it would for any core
+here.
+
 ---
 
 ## 5. Raspberry Pi silicon

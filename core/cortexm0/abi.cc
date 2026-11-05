@@ -131,6 +131,11 @@ void cortexm0_map_mirror(CortexM0Cpu* cpu, uint32_t address, uint32_t source,
     as_handle(cpu)->cpu.map_mirror(address, source, invert != 0, mask);
 }
 
+void cortexm0_map_field(CortexM0Cpu* cpu, uint32_t address, uint32_t target,
+                        uint32_t shift) {
+    as_handle(cpu)->cpu.map_field(address, target, shift);
+}
+
 void cortexm0_map_constant(CortexM0Cpu* cpu, uint32_t address, uint32_t value) {
     as_handle(cpu)->cpu.map_constant(address, value);
 }
@@ -200,6 +205,25 @@ int cortexm0_step(CortexM0Cpu* cpu) {
 
 uint32_t cortexm0_step_entry(const CortexM0Cpu* cpu) {
     return cpu == nullptr ? 0u : as_handle(cpu)->step_pc;
+}
+
+void cortexm0_set_profile(CortexM0Cpu* cpu, int profile) {
+    if (profile == static_cast<int>(cortexm0::Profile::V6M) ||
+        profile == static_cast<int>(cortexm0::Profile::V7EM)) {
+        as_handle(cpu)->cpu.set_profile(static_cast<cortexm0::Profile>(profile));
+    }
+}
+
+int cortexm0_profile(const CortexM0Cpu* cpu) {
+    return static_cast<int>(as_handle(cpu)->cpu.profile());
+}
+
+uint32_t cortexm0_itstate(const CortexM0Cpu* cpu) {
+    return as_handle(cpu)->cpu.itstate();
+}
+
+void cortexm0_set_itstate(CortexM0Cpu* cpu, uint32_t itstate) {
+    as_handle(cpu)->cpu.set_itstate(static_cast<uint8_t>(itstate));
 }
 
 }  // extern "C"

@@ -44,7 +44,14 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
 #: silent mismatch this number exists to turn into a message.
 #:
 #: 14 adds `cortexm0_step_entry` (OH-225).
-ABI_VERSION = 14
+#:
+#: 15 adds the profile switch and ITSTATE (OH-64): `cortexm0_set_profile`,
+#: `cortexm0_profile`, `cortexm0_itstate` and `cortexm0_set_itstate`.
+ABI_VERSION = 15
+
+#: Must match cortexm0::Profile. Armv6-M is what `reset` restores.
+PROFILE_V6M = 0
+PROFILE_V7EM = 1
 
 #: Must match cortexm0::WriteOp. Spelled at call sites rather than numbered.
 WRITE_OPS = {"store": 0, "set": 1, "clear": 2, "xor": 3}
@@ -54,8 +61,9 @@ OK = 0
 UNIMPLEMENTED = 1
 MEMORY_FAULT = 2
 
-#: How many halfwords a `HostFault` shows from where its step began: BL, the
-#: one 32-bit encoding on this part, is two.
+#: How many halfwords a `HostFault` shows from where its step began: the
+#: longest encoding either profile decodes -- BL under Armv6-M, any Thumb-2
+#: wide instruction under Armv7E-M -- is two.
 FAULT_HALFWORDS = 2
 
 #: How ctypes words an access violation that WROTE (its SetException formats
@@ -178,6 +186,10 @@ _SIGNATURES = {
          ctypes.c_uint32],
         None,
     ),
+    "cortexm0_map_field": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32],
+        None,
+    ),
     "cortexm0_map_constant": (
         [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32], None
     ),
@@ -196,6 +208,10 @@ _SIGNATURES = {
     "cortexm0_executed": ([ctypes.c_void_p], ctypes.c_uint64),
     "cortexm0_step": ([ctypes.c_void_p], ctypes.c_int),
     "cortexm0_step_entry": ([ctypes.c_void_p], ctypes.c_uint32),
+    "cortexm0_set_profile": ([ctypes.c_void_p, ctypes.c_int], None),
+    "cortexm0_profile": ([ctypes.c_void_p], ctypes.c_int),
+    "cortexm0_itstate": ([ctypes.c_void_p], ctypes.c_uint32),
+    "cortexm0_set_itstate": ([ctypes.c_void_p, ctypes.c_uint32], None),
     "cortexm0_fault_address": ([ctypes.c_void_p], ctypes.c_uint32),
     "cortexm0_fault_was_fetch": ([ctypes.c_void_p], ctypes.c_int),
     "cortexm0_in_range": (
@@ -288,6 +304,27 @@ class Cpu:
 
     def reset(self) -> None:
         self._lib.cortexm0_reset(self._handle)
+
+    def set_profile(self, profile: int) -> None:
+        """Decode for `PROFILE_V6M` or `PROFILE_V7EM`. Anything else raises.
+
+        Checked here as well as in the library, which ignores an unknown
+        value: a board asking for a profile that does not exist should hear
+        about it, not run on whichever one the core already had.
+        """
+        if profile not in (PROFILE_V6M, PROFILE_V7EM):
+            raise AbiError(f"no such profile: {profile!r}")
+        self._lib.cortexm0_set_profile(self._handle, profile)
+
+    def profile(self) -> int:
+        return int(self._lib.cortexm0_profile(self._handle))
+
+    def itstate(self) -> int:
+        """EPSR's IT[7:0]: zero outside an IT block."""
+        return int(self._lib.cortexm0_itstate(self._handle))
+
+    def set_itstate(self, value: int) -> None:
+        self._lib.cortexm0_set_itstate(self._handle, value & 0xFF)
 
     # --- memory -----------------------------------------------------------
 
@@ -402,6 +439,19 @@ class Cpu:
         self._lib.cortexm0_map_mirror(
             self._handle, address, source, 1 if invert else 0, mask
         )
+
+    def map_field(self, address: int, target: int, shift: int) -> None:
+        """A register of its own whose bit 0 is bit `shift` of `target`.
+
+        The nRF52840's `PIN_CNF[n]`, whose bit 0 is the port's `DIR` bit n
+        seen from a second address. A write stores the word and copies bit 0
+        into `target`; a read answers the word with bit 0 taken from
+        `target`, so `DIRSET` and `PIN_CNF` each see what the other wrote. The
+        core's `map_field` says why neither a mirror nor an alias can.
+        """
+        if not 0 <= shift < 32:
+            raise AbiError(f"bit {shift} is not in a 32-bit register")
+        self._lib.cortexm0_map_field(self._handle, address, target, shift)
 
     def map_constant(self, address: int, value: int) -> None:
         """An address whose reads answer `value` and whose writes are ignored.

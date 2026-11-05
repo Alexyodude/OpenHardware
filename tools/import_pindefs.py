@@ -2367,6 +2367,17 @@ _SAMD21 = (
 )
 # Zephyr calls the nRF52840 XIAO `xiao_ble`. NFC1 and NFC2 are opted in by
 # name: they really are P0.09 and P0.10, the nRF52840's NFC antenna pins.
+#
+# So are the board's three LEDs, as the C5, C6 and RP2040 opt in `LED`, and
+# under the variant's own three names rather than one: the XIAO nRF52840's
+# LED is an RGB part with a pin per colour, and `variant.h` writes
+# `LED_RED (11)`, `LED_GREEN (13)` and `LED_BLUE (12)` as Arduino indices
+# that `variant.cpp`'s table turns into pins, exactly as it does `D0`.
+# `PIN_LED` and `LED_BUILTIN` are aliases of `LED_RED`, and an alias is not a
+# number, so neither is read (`read_c_pin_constants`). OH-64's board module
+# reads all three, which is why they are here: `pin_states` answers under
+# `HEADER`, and a key it answers under that `HEADER` lacks is what
+# `webui.api.level_keys` exists to catch.
 _NRF52840 = (
     zephyr_connector("xiao_ble", nordic_flat_pin),
     arduino_indexed(
@@ -2374,9 +2385,10 @@ _NRF52840 = (
         "variants/Seeed_XIAO_nRF52840/variant.h",
         "variants/Seeed_XIAO_nRF52840/variant.cpp",
         read_nrf_pin_map,
-        extras=("NFC1", "NFC2"),
+        extras=("NFC1", "NFC2", "LED_RED", "LED_GREEN", "LED_BLUE"),
     ),
 )
+_NRF52840_LEDS = ("LED_RED", "LED_GREEN", "LED_BLUE")
 # One source each: Nordic ships these boards inside nRF Connect rather than as
 # an Arduino core, and Zephyr upstream already carries the same connector node.
 #: `NFC1` and `NFC2` are GPIOs on this part when the NFC protection bit is
@@ -2802,8 +2814,10 @@ BOARDS = {
         not_read="Seeed's own Zephyr board for the STM32C5 (platform-seeedboards, "
                  "OH-231) is published and is not read here",
     ),
-    "XIAO-nRF52840-DIP": Board("nRF52840", _NRF52840),
-    "XIAO-nRF52840-SMD": Board("nRF52840", _NRF52840, reasons=_NRF52840_SWD),
+    "XIAO-nRF52840-DIP": Board("nRF52840", _NRF52840, on_board=_NRF52840_LEDS),
+    "XIAO-nRF52840-SMD": Board(
+        "nRF52840", _NRF52840, on_board=_NRF52840_LEDS, reasons=_NRF52840_SWD
+    ),
     "XIAO-nRF54LM20A-DIP": Board(
         "nRF54LM20A", _NRF54LM20A, reasons=_NRF54LM20A_OTHER
     ),
@@ -3727,9 +3741,15 @@ def render_header(table: HeaderTable) -> str:
         )
     if table.on_board:
         rows = ", ".join(f"`{label}`" for label in table.on_board)
+        # Plural on the XIAO nRF52840, whose one RGB LED is three pins, one
+        # per colour; singular everywhere else, which is what this said
+        # before it had a board to say anything else about (OH-64).
+        one = len(table.on_board) == 1
         sentences.append(
-            f"{rows} has no pad: it is the board's own LED, which the Arduino "
-            f"variant above defines and the header does not carry."
+            f"{rows} {'has' if one else 'have'} no pad: "
+            f"{'it is the board' if one else 'they are the board'}'s own LED, "
+            f"which the Arduino variant above defines and the header does not "
+            f"carry."
         )
     sentences.append(
         "`tests/rules/test_import_pindefs.py` holds this block equal to what the "
