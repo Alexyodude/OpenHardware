@@ -1859,6 +1859,46 @@ def test_a_ceramic_block_is_a_dielectric_in_its_own_colour():
     assert not borrowers, f"still shaded in the borrowed #e4e3cf: {borrowers}"
 
 
+def test_a_modelled_switch_draws_the_body_kicads_switches_paint():
+    """**The two modelled switches said they drew a switch's black body and
+    drew an inductor's** (OH-163, carried from OH-217).
+
+    OH-214 keyed them `#464646`, KiCad's `CAP-CERAMIC-05` -- the colour of a
+    chip inductor's body and a USB receptacle's insulator -- while
+    `BUTTON_TD1183SA`'s own citation said it read KiCad's switch models. Those
+    models paint their body `#262525`, and so must a slab that cites them. The
+    cache half skips without the KiCad model cache, which a run of
+    `tools/compose_board_3d.py` fetches; the half before it needs nothing.
+    """
+    import re
+
+    from tools.import_3d_model import CACHE, FINISHES
+    from tools.model_from_datasheet import SLABS
+
+    named = {"SW4-SMD-2.8-2.6X1.6X0.53MM", "BUTTON_TD1183SA"}
+    switches = {spec.package: spec for spec in SLABS if spec.package in named}
+    assert set(switches) == named, sorted(switches)
+    for package, spec in switches.items():
+        assert spec.colour == "#262525", (package, spec.colour)
+        assert "the switch body" in spec.colour_source, package
+    assert "switch" not in FINISHES["#464646"].why, (
+        "#464646's entry still claims the modelled switches")
+    assert "switch" in FINISHES["#262525"].why
+
+    steps = sorted(CACHE.glob("component-Button_Switch_SMD-*.step"))
+    if not steps:
+        pytest.skip("no Button_Switch_SMD STEP fetched; run "
+                    "tools/compose_board_3d.py")
+    triple = re.compile(r"COLOUR_RGB\(\s*'[^']*'\s*,\s*([-+.\dEe]+)\s*,"
+                        r"\s*([-+.\dEe]+)\s*,\s*([-+.\dEe]+)\s*\)")
+    for step in steps:
+        carried = {"#" + "".join(f"{round(float(v) * 255):02x}" for v in found)
+                   for found in triple.findall(step.read_text(encoding="utf-8"))}
+        assert "#262525" in carried, (step.name, sorted(carried))
+        darkest = min(carried, key=lambda hex_: int(hex_[1:3], 16))
+        assert darkest == "#262525", (step.name, sorted(carried))
+
+
 # --- one named product out of an assembly STEP (OH-228) ------------------------
 
 

@@ -375,6 +375,15 @@ _MOULDED_IC = (
     "and these are the same kind of moulded IC body"
 )
 _BARE_DIE = "a bare silicon die, as the WLCSP-47 and WLCSP-20 below"
+#: OH-163: both modelled switches were `#464646` from OH-214, which keyed
+#: them with KiCad's `CAP-CERAMIC-05` -- an inductor's body and a USB
+#: insulator -- while saying they drew a switch's body.
+_SWITCH_BODY = (
+    "moulded black plastic, the switch body, in the colour KiCad's own "
+    "switch models paint it: `#262525` on every `Button_Switch_SMD` STEP "
+    "the composed boards place -- the KMR2, the SKRK, the PCM12 and the "
+    "B3S-1000 -- each beside its metal or plunger colour, read 2026-11-05"
+)
 
 SLABS: tuple[ModelledSlab, ...] = (
     # --- OH-150: the small silicon, which OH-104 deferred rather than
@@ -571,8 +580,8 @@ SLABS: tuple[ModelledSlab, ...] = (
     ModelledSlab(
         package="SW4-SMD-2.8-2.6X1.6X0.53MM",
         pcb=REPO / "third_party" / "seeed-pcb" / "RP2350.kicad_pcb",
-        colour="#464646",
-        colour_source="moulded black plastic, the switch body",
+        colour="#262525",
+        colour_source=_SWITCH_BODY,
         why_not_fetched=(
             "the smallest surface-mount switch in KiCad's 159-file "
             "Button_Switch_SMD is the TS-1088 at 2.9 x 3.9 mm, against a "
@@ -608,10 +617,10 @@ SLABS: tuple[ModelledSlab, ...] = (
     ModelledSlab(
         package="BUTTON_TD1183SA",
         pcb=REPO / "third_party" / "seeed-pcb" / "ESP32-C5.kicad_pcb",
-        colour="#464646",
+        colour="#262525",
         colour_source=(
-            "moulded black plastic, the same reading the SW4 switch above "
-            "takes and carrying the same uncertainty: a tactile switch is "
+            _SWITCH_BODY + ", the same reading the SW4 switch above takes "
+            "and carrying the same uncertainty: a tactile switch is "
             "TWO materials and a slab is one colour. KiCad's own switch "
             "models draw a cover over a black body: `#818181`, which "
             "KiCad's palette calls MET-SILVER and "

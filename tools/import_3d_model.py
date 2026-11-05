@@ -621,7 +621,7 @@ UNSTYLED = "#808080"
 #: KiCad's file states it, the epoxy is `#262525`, 1.9% linear, and this mask
 #: is 1.1% -- below the chips it was set above. The argument for a grey rather
 #: than a black stands; the value no longer does what this paragraph says, and
-#: OH-214 changed no judged constant; choosing another is OH-217's.
+#: OH-214 changed no judged constant; choosing another is OH-263's.
 #:
 #: **What would retire this judgement**: Seeed stating a colour, or somebody
 #: measuring a board. Recorded so it can be replaced rather than inherited.
@@ -1007,7 +1007,9 @@ FINISHES: dict[str, Finish] = {
         "moulded black plastic and epoxy: 3,598 triangles across the bodies "
         "of the same six packages whose legs are #d2d1c7 above -- the QFN's "
         "encapsulant, the barrel jack's housing, the electrolytics' sleeves, "
-        "the header shrouds, the DIP's body"
+        "the header shrouds, the DIP's body; and every KiCad switch's "
+        "body, which `tools/model_from_datasheet.py`'s two modelled "
+        "switches draw (OH-163)"
     )),
     "#3f3f45": Finish(0.0, 0.70, (
         "the USB-B's insulator, named `cavity` in "
@@ -1082,9 +1084,8 @@ FINISHES: dict[str, Finish] = {
         "caps in `Inductor_SMD.3dshapes/L_0402_1005Metric.wrl` at tag 9.0.0 "
         "-- and the GCT USB4105 receptacle's insulator; "
         "`tools/model_from_datasheet.py` calls it the USB sockets' "
-        "`insulator` and the modelled switches' moulded black plastic body. "
-        "Fired chip body or moulded plastic, none is a metal: KiCad gives "
-        "them one name, and at six percent grey none could be (the "
+        "`insulator`. Fired chip body or moulded plastic, none is a metal: "
+        "KiCad gives them one name, and at six percent grey none could be (the "
         "near-black argument above). The roughness is a JUDGEMENT between "
         "CERAMIC's 0.60 and moulded epoxy's 0.70, because the group is both"
     )),
