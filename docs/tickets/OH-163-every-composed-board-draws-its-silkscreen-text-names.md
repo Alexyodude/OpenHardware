@@ -2,7 +2,7 @@
 id: OH-163
 title: Every composed board draws its silkscreen text, names its default-finish colours,
   and stops double-reporting its test points
-status: open
+status: in-progress
 priority: P2
 created: '2026-09-04'
 touches:
@@ -177,3 +177,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-15:** 2026-10-15: takes back tools/import_3d_model.py and tests/rules/test_import_3d_model.py from OH-161 (slice 4d merged, master 7b81ee3). From OH-161's review: part_pads parses the footprint twice after the pin check, and the MSOP-8 STEP is fetched from KiCad master without a pin.
 
 **Note 2026-10-16:** Lends PROVENANCE.md to OH-241 (the static site: which 3D models and runtime files it may publish, and their notices); then OH-244 borrows it for its browser compiler's section. It comes back when both are done.
+
+**Note 2026-11-05:** 2026-11-05: taken in worktree oh-163 to close it out. Steps 1, 2 and 3 are merged and step 4 is closed into OH-231; what is left is the leftovers carried here (OH-217's three colour items, OH-199's and OH-161's importer notes, step 1's refused and latent text), each to be done here or filed.
