@@ -34,7 +34,9 @@
 # the docstrings are from those runs.
 
 import json
+import math
 import pathlib
+import re
 import shutil
 import subprocess
 import textwrap
@@ -2020,3 +2022,281 @@ def test_a_settled_lead_takes_the_shape_its_two_ends_give_it(tmp_path):
         f"{result['lengthShowsAs']}, so this test cannot see a memory that is "
         f"there and its answer about plastic set means nothing"
     )
+
+
+# ## The oracle step 4 asks for, and what a photograph can and cannot retire
+#
+# OH-162 step 4 says one photograph of one lead's sag "would retire GRAVITY,
+# DAMPING and SLACK as judgements". **The resting shape of a flexible lead
+# holds none of the three.** A chain of fixed length between two fixed points
+# hangs in the shape its length and span give it, whatever pulls it down and
+# however long it takes to stop: weight scales every tension alike and
+# cancels, and damping is gone once nothing moves. `SLACK` is not a property
+# of a lead at all -- it is which length of lead was picked up.
+#
+# That shape is worked out below without the solver, and the tests hold the
+# solver to it. What is left over when they pass is the one thing a still
+# photograph of a sag CAN measure: how far a real lead's bending holds it off
+# the chain, which is `STIFFNESS` (and `NODES`, which sets how far apart the
+# bent pairs are). `GRAVITY` and `DAMPING` are dynamics -- how fast a lead
+# falls and how long it swings -- and want a video, not a still.
+
+
+def discrete_catenary_sag(span: float, length: float, links: int) -> float:
+    """How far below its ends a chain of equal links hangs, worked out by hand.
+
+    The solver's chain with its stretch left out: `links` segments of `length / links`, an
+    equal weight on every node between the two pinned ends, and the ends
+    level. At rest each free node is in balance, so the horizontal tension is
+    the same in every link and the vertical tension changes by one node's
+    weight across each node; for a level span the links are symmetric about
+    the middle, so the slope of link `k` is `(k - (links - 1) / 2) * c` for
+    the one `c` -- weight over horizontal tension -- that makes the links
+    reach across the gap. Nothing about gravity, damping or time survives
+    into `c`.
+
+    `c` is found by bisection, because the width the links span falls
+    strictly as `c` grows.
+    """
+    link = length / links
+
+    def width(c: float) -> float:
+        return sum(link / (1 + ((k - (links - 1) / 2) * c) ** 2) ** 0.5
+                   for k in range(links))
+
+    low, high = 0.0, 1e6
+    for _ in range(200):
+        middle = (low + high) / 2
+        if width(middle) > span:
+            low = middle
+        else:
+            high = middle
+    c = (low + high) / 2
+    height, lowest = 0.0, 0.0
+    for k in range(links):
+        slope = (k - (links - 1) / 2) * c
+        height += link * slope / (1 + slope * slope) ** 0.5
+        lowest = min(lowest, height)
+    return -lowest
+
+
+def catenary_sag(span: float, length: float) -> float:
+    """The textbook catenary's sag: `2a sinh(span / 2a) = length`, solved for a."""
+    low, high = 1e-6, 1e6
+    for _ in range(400):
+        a = (low * high) ** 0.5
+        if 2 * a * math.sinh(span / (2 * a)) > length:
+            low = a
+        else:
+            high = a
+    return a * (math.cosh(span / (2 * a)) - 1)
+
+
+def patched(tmp_path: pathlib.Path, name: str, **constants: str) -> pathlib.Path:
+    """A copy of `wires.js` with some of its `export const`s changed.
+
+    Each substitution must match exactly once, so a renamed constant fails
+    here rather than leaving the copy identical to the original and every
+    comparison against it trivially true.
+    """
+    source = WIRES.read_text(encoding="utf-8")
+    for constant, value in constants.items():
+        source, hits = re.subn(rf"^export const {constant} = [^;]+;",
+                               f"export const {constant} = {value};",
+                               source, flags=re.MULTILINE)
+        assert hits == 1, f"wires.js declares {constant} {hits} times"
+    copy = tmp_path / f"wires_{name}.mjs"
+    copy.write_text(source, encoding="utf-8")
+    return copy
+
+
+#: What every sag test below runs: a lead of each slack across a level
+#: ten-unit span in clear air, settled, reporting its sag, the length its
+#: segments really add up to, its energy and every node. Six thousand frames
+#: because the slackest lead under the lightest gravity is the slowest to stop.
+SAG_PROBE = """
+    const out = [];
+    for (const slack of SLACKS) {
+      const rope = new Rope([0, 0, 0], [10, 0, 0], 22, slack);
+      for (let frame = 0; frame < 6000; frame++) rope.advance(1 / 60);
+      let lowest = Infinity, length = 0;
+      for (let i = 0; i < rope.count; i++) {
+        const p = rope.point(i);
+        lowest = Math.min(lowest, p[1]);
+        if (i > 0) {
+          const q = rope.point(i - 1);
+          length += Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+        }
+      }
+      out.push({slack, sag: -lowest, length, energy: rope.energy(),
+                position: Array.from(rope.position)});
+    }
+    console.log(JSON.stringify(out));
+"""
+
+
+def settle(tmp_path: pathlib.Path, wires: pathlib.Path, slacks) -> list:
+    """Run `SAG_PROBE` against one copy of the solver, one row per slack."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("no node on PATH; wires.js is ES module arithmetic and "
+                    "needs one to run")
+    probe = tmp_path / f"sag_{wires.stem}.mjs"
+    probe.write_text(
+        f"import {{ Rope }} from {wires.as_uri()!r};\n"
+        f"const SLACKS = {json.dumps(list(slacks))};\n"
+        + textwrap.dedent(SAG_PROBE), encoding="utf-8")
+    done = subprocess.run([node, str(probe)], capture_output=True, text=True)
+    if done.returncode != 0:
+        raise AssertionError(f"node exited {done.returncode}\n{done.stderr}")
+    return json.loads(done.stdout.strip().splitlines()[-1])
+
+
+def off_the_chain(row: dict) -> float:
+    """How much shallower a settled lead hangs than a chain of its own length."""
+    return 1 - row["sag"] / discrete_catenary_sag(10, row["length"], 21)
+
+
+def test_the_hand_worked_chain_is_the_textbook_catenary_when_its_links_are_short():
+    """The oracle is checked before anything is checked against it.
+
+    Two derivations that share nothing -- a sum over links, and the closed
+    form in `cosh` -- must agree as the links get short, and a chain with no
+    slack must not hang at all. Measured 2026-11-05 over ten units at slack
+    1.35: 4.03112 with the solver's 21 links, 4.04017 for the catenary, and
+    4.04017 again at 4,000 links; the same to four figures at every slack
+    from 1.02 to 2.0.
+
+    Mutated three ways -- the links' slopes centred one link off, the height
+    summed as the slope rather than its sine, the links one too short -- and
+    each fails the first assertion here, before any solver is run.
+    """
+    for slack in (1.02, 1.1, 1.35, 1.6, 2.0):
+        fine = discrete_catenary_sag(10, 10 * slack, 4000)
+        exact = catenary_sag(10, 10 * slack)
+        assert abs(fine - exact) < 1e-4 * exact, (slack, fine, exact)
+        # Coarse links cut the curve's corners, so they hang shallower.
+        assert discrete_catenary_sag(10, 10 * slack, 21) < exact, slack
+    assert discrete_catenary_sag(10, 10, 21) < 1e-9
+
+
+def test_a_limp_lead_hangs_in_the_chain_of_its_own_length_under_any_gravity(
+        tmp_path):
+    """**The solver is the chain the oracle describes**, whatever pulls on it.
+
+    With the bending constraint off, a settled lead's sag is the hand-worked
+    chain's for the length its segments really add up to, at the shipped
+    gravity, ten times it and a tenth of it. Measured 2026-11-05, worst of
+    five slacks from 1.02 to 2.0: +0.052% at the shipped gravity, +0.29% at
+    ten times it and +0.006% at a tenth, every one at the tautest slack and
+    every one deeper. That is the solver's own compliance -- gravity
+    stretches its segments, a little -- and it is the ONLY way gravity
+    reaches the shape: against the REST length instead, the same tautest
+    lead is 20.6% too deep at the shipped gravity and 97% at ten times it.
+
+    The bound is 0.5%, above the worst of those. What it guards against is a
+    solver that stops being a chain, and both such mutations fail it:
+    gravity on the wrong axis, and a weight that grows along the lead.
+    """
+    slacks = (1.02, 1.1, 1.35, 1.6, 2.0)
+    for gravity in ("-36", "-360", "-3.6"):
+        limp = patched(tmp_path, f"limp{gravity}", STIFFNESS="0",
+                       GRAVITY=gravity)
+        rows = settle(tmp_path, limp, slacks)
+        assert len(rows) == len(slacks), rows
+        for row in rows:
+            assert row["energy"] < 1e-12, (gravity, row["slack"], row["energy"])
+            miss = -off_the_chain(row)
+            assert abs(miss) < 0.005, (
+                f"at gravity {gravity} and slack {row['slack']} a limp lead "
+                f"hangs {row['sag']:.5f}, {miss * 100:+.3f}% off a chain of "
+                f"its own length"
+            )
+
+
+def test_how_long_a_lead_swings_is_not_in_the_shape_it_stops_in(tmp_path):
+    """**A photograph cannot retire `DAMPING`**, because a still has none in it.
+
+    The same leads settled keeping 0.9 and 0.995 of their velocity a step,
+    either side of the shipped 0.982, stop where the shipped one does.
+    Measured 2026-11-05: every coordinate of every node within 1.1e-12 at
+    five slacks, which is float noise. The bound is 1e-9. Folding `DAMPING`
+    into the fall, as a terminal speed would, fails it.
+
+    **This holds because the shipped lead has one way to hang, and that is
+    not a law.** With the bending constraint's correction cut to a tenth, the
+    slack 2.0 lead at 0.995 settles 3.07 units from the one at 0.982: the
+    bend is weak enough to let the lead fold and strong enough to hold the
+    fold, and how long the lead swung decides which shape it stops in. The
+    same happens at the shipped stiffness under a tenth of the shipped
+    gravity: the slack 2.0 lead stays folded with 0.21 units of sag where a
+    chain has 7.93, and the same lead kept at 0.9 a step hangs 7.46. Neither
+    is the shipped lead, and this test is what would say so if it became one.
+    """
+    slacks = (1.1, 1.35, 2.0)
+    shipped = settle(tmp_path, WIRES, slacks)
+    for damping in ("0.9", "0.995"):
+        other = settle(tmp_path, patched(tmp_path, f"damp{damping}",
+                                         DAMPING=damping), slacks)
+        assert len(shipped) == len(other) == len(slacks), (shipped, other)
+        for mine, theirs in zip(shipped, other):
+            assert theirs["energy"] < 1e-12, (damping, theirs["slack"])
+            apart = max(abs(a - b) for a, b in
+                        zip(mine["position"], theirs["position"]))
+            assert apart < 1e-9, (
+                f"damping {damping} settles the slack {mine['slack']} lead "
+                f"{apart} away from the shipped one"
+            )
+
+
+def test_a_shipped_lead_hangs_shallower_than_a_chain_and_that_is_its_bending(
+        tmp_path):
+    """What the bending constraint is FOR, held to a number.
+
+    `test_a_settled_lead_takes_the_shape_its_two_ends_give_it` records that
+    **nothing in this file checked it**: stub `stiffen` with an early return
+    and the test named for it still passes. Against the oracle it cannot. A limp lead IS the chain of its own
+    length (the test above), so any sag short of that chain is bending, and
+    the shipped lead is short of it by an amount that grows with slack.
+    Measured 2026-11-05 over ten units: 0.25% shallower at slack 1.35, 0.91%
+    at 1.6 and 2.43% at 2.0, where the limp lead is 0.011%, 0.008% and 0.006%
+    DEEPER. Below 1.35 the two cannot be told apart -- at 1.02 the shipped
+    lead is 0.031% shallower and the limp one 0.052% deeper -- so the slacks
+    here start at the shipped one. Stub `stiffen` and this fails; so does a
+    lead built a segment short.
+
+    **This is the number a photograph would be compared with.** A lead of
+    measured length across a measured span either sags like the chain of that
+    length or by about this much less, and that one comparison is what would
+    make `STIFFNESS` a measurement rather than a judgement. The chain needs
+    no solver, so neither does the photograph's oracle: at the shipped
+    `SLACK` the shipped lead is 0.15% deeper than the chain of its REST
+    length, the length a person would have cut.
+
+    The fixture that must report nothing is the limp lead, held here to the
+    same bound the other way.
+    """
+    slacks = (1.35, 1.6, 2.0)
+    limp = settle(tmp_path, patched(tmp_path, "limp", STIFFNESS="0"), slacks)
+    shipped = settle(tmp_path, WIRES, slacks)
+    assert len(shipped) == len(limp) == len(slacks), (shipped, limp)
+    for stiff, bendless in zip(shipped, limp):
+        assert stiff["energy"] < 1e-12, stiff["slack"]
+        assert off_the_chain(stiff) > 0.001, (
+            f"at slack {stiff['slack']} the shipped lead hangs only "
+            f"{off_the_chain(stiff) * 100:.3f}% shallower than a limp chain "
+            f"of its own length, so the bending constraint is doing nothing"
+        )
+        assert abs(off_the_chain(bendless)) < 0.001, (
+            bendless["slack"], off_the_chain(bendless))
+    # The margin grows with slack: a slacker lead bends harder at its ends.
+    margins = [off_the_chain(row) for row in shipped]
+    assert margins == sorted(margins), margins
+    # And at the shipped slack, against the length a person would measure.
+    # The docstrings here say "shipped" of these two literals; a retune that
+    # leaves them behind fails here rather than leaving the words false.
+    source = WIRES.read_text(encoding="utf-8")
+    assert "export const SLACK = 1.35;" in source
+    assert "export const GRAVITY = -36;" in source
+    rest = discrete_catenary_sag(10, 13.5, 21)
+    assert abs(shipped[0]["sag"] - rest) / rest < 0.005, (shipped[0]["sag"], rest)

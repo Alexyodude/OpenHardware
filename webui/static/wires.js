@@ -49,10 +49,24 @@ export const MAX_SUBSTEPS = 8;
 //: would be 78,480 -- a wire that falls a board's width in three milliseconds.
 //: This is the value at which a 20 mm jumper lead settles in about a second,
 //: which is what a wire that length looks like on a bench.
+//:
+//: **With the bending off it sets how fast a lead falls and not the shape it
+//: comes to rest in**: a chain hangs in the curve its length and span give
+//: it under any weight, and this one with STIFFNESS at 0 does, to 0.3% of
+//: the chain of its own stretched length at ten times this value (OH-162
+//: step 4). With the bending on it does not: weight is what the bend is
+//: measured against, so the shipped lead at slack 1.35 is 1.27% shallower
+//: than its chain at a tenth of this and 0.04% deeper at ten times it. So a
+//: photograph of a sag cannot measure this, and a STIFFNESS fitted to one
+//: holds only at this value; a video of a lead falling could measure it.
 export const GRAVITY = -36;
 
 //: Velocity kept per step. Air, and the cable's own stiffness, neither of
 //: which is modelled: a rope with none of this never stops swinging.
+//: How long a lead swings, and so nothing a still photograph can see -- the
+//: shipped lead stops in the same place at 0.9 and at 0.995 (OH-162 step 4).
+//: That is because it has one way to hang; a lead with a weaker bend can
+//: fold, and then how long it swung decides where it stops.
 export const DAMPING = 0.982;
 
 //: Constraint passes per step. Below about eight the cable stretches visibly
