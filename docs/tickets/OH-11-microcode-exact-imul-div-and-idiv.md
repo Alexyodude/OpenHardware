@@ -88,3 +88,7 @@ FILED: OH-253, PROVENANCE.md does not record muldiv.cc as a MartyPC port (PROVEN
 **Note 2026-11-05:** Verified before landing: build_core OK; pytest 2776 passed, 681 skipped, 5 failed, the five being OH-250's composer tests, which fail in any worktree with no third_party fetched and touch nothing here; every other checkall row OK, with check_ticket_claims --base origin/master.
 
 **Note 2026-11-05:** Landing came back: the claim check failed, because one push carried the OH-11 fix and the commit filing OH-253, and check_ticket_claims holds the whole diff to one ticket, so OH-253's own ticket file read as a write into another ticket's files. Fixed by landing each commit alone, checked under its own ticket id.
+
+**Note 2026-11-05:** Landing came back a second time, before any push: another session had filed a different OH-251 on origin/master meanwhile, so the PROVENANCE.md ticket is renumbered OH-253 and the references above follow it.
+
+**Note 2026-11-05:** Landing came back again, before any push: other sessions filed their own tickets under each id this one took, so it is now OH-253, the next free id at the moment it was pushed. The landing agent renumbers and pushes the filing in one pass, because a filing handed over by hand lost that race twice.
