@@ -50,7 +50,6 @@ touches:
 - tests/riscv32/**
 - webui/devices/**
 - tests/webui/test_mcp9808.py
-- tests/webui/test_pin_view.py
 - tests/webui/test_compile.py
 - webui/emulator_server.py
 - webui/boards/rp2350.py
@@ -863,3 +862,5 @@ CONFIRMED FOR THE OWNER, with the design's own strongest objection recorded: opt
 **Note 2026-10-15:** 2026-10-15: takes back webui/api.py, webui/static/emulator.js and tests/webui/test_board_run.py from OH-233 (done).
 
 **Note 2026-11-05:** 2026-11-05: lends core/cortexm0/abi.py to OH-64 for the Armv7E-M profile switch (cortexm0_set_profile, an ABI bump); they come back when it lands.
+
+**Note 2026-11-05:** 2026-11-05: lends tests/webui/test_pin_view.py to OH-64: the two XIAO-nRF52840 boards now read levels through webui/boards/nrf52840.py, so they leave the silent list and nrf52840 joins the modules that name their pins; it comes back when OH-64 lands.
