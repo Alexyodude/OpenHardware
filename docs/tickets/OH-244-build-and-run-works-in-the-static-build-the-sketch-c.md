@@ -2,7 +2,7 @@
 id: OH-244
 title: 'Build and run works in the static build: the sketch compiles in the browser
   tab, avr-gcc as WebAssembly, Uno first, the same bytes as the server'
-status: open
+status: in-progress
 priority: P1
 created: '2026-10-16'
 touches:
