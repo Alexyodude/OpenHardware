@@ -2,9 +2,12 @@
 id: OH-165
 title: A wire segment passes between two nodes through a pin header, and inside, proud
   and stretch all read clean
-status: open
+status: in-progress
 priority: P2
 created: '2026-09-05'
+touches:
+- webui/static/wire_probe.js
+- tests/webui/test_wire_probe.py
 ---
 
 A jumper lead passes clean through an Arduino Uno pin header and every number this repository watches reads zero.
@@ -40,3 +43,5 @@ STEPS:
 3. Then, and only then, whatever the fix is: segment-against-box in `collide`, or a node count that scales with span so a segment is never longer than the thinnest solid, or a swept test. Each of those changes the drape of every lead on every board, which is what OH-162 step 4's photograph exists to justify.
 
 Found while measuring OH-162 step 3, which was declined; that ticket's note carries the same numbers. It needs `webui/static/wires.js` and `tests/webui/test_wires.py`, which OH-162 claims until its step 4 is done, so this ticket claims nothing yet.
+
+**Note 2026-11-05:** Taken for steps 1 and 2. OH-162 still holds webui/static/wires.js and tests/webui/test_wires.py (its step 4 was taken today, and its worktree has test_wires.py modified), so the segment probe goes in a new import-free module, webui/static/wire_probe.js, with its own test file, tests/webui/test_wire_probe.py, and neither of OH-162's files is touched. Step 3, the fix, needs wires.js and changes the drape of every lead, so it is not attempted here.
