@@ -1,12 +1,15 @@
 ---
 id: OH-159
 title: A hardware capture harness, so silicon is the oracle Xtensa and Armv7E-M lack
-status: open
+status: in-progress
 priority: P2
+owner: oh-159-worktree
 created: '2026-09-03'
 touches:
 - tools/capture_trace.py
 - tests/fixtures/hardware/**
+- docs/tickets/OH-159-*
+- tests/rv32/test_capture_trace.py
 ---
 
 Two blocked tickets want the same thing and neither can produce it alone: an
