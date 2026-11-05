@@ -10,7 +10,6 @@ touches:
 - tests/rules/test_inventory.py
 - webui/static/board3d-panel.js
 - tests/webui/test_board3d.py
-- tools/import_pindefs.py
 - webui/boards/XIAO-MG24-SMD.json
 - webui/boards/XIAO-nRF54l15-SMD.json
 - webui/boards/XIAO-nRF54LM20A-SMD.json
@@ -345,3 +344,5 @@ LEFT is as the slice 2 note says, with one item added. A pad its footprint names
 **Note 2026-10-15:** 2026-10-15: takes back tools/import_pindefs.py, its test and the three XIAO board files from OH-173 (pin_source landed; chip_pin unchanged).
 
 **Note 2026-11-05:** 2026-11-05: lends tests/rules/test_import_pindefs.py to OH-64, whose nRF52840 module joins two checks that name their chips and count their boards on purpose (the chips with header markers, and the boards whose pads agree with a module, 13 to 15); it comes back when that lands.
+
+**Note 2026-11-05:** 2026-11-05: lends tools/import_pindefs.py to OH-64 too: the XIAO nRF52840's three LEDs are opted in as `on_board` labels, as the C5, C6 and RP2040 opt in `LED`, so the generated HEADER carries the pins its `pin_states` answers under; it comes back when that lands.
