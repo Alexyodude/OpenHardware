@@ -1,7 +1,7 @@
 ---
 id: OH-159
 title: A hardware capture harness, so silicon is the oracle Xtensa and Armv7E-M lack
-status: in-progress
+status: blocked
 priority: P2
 owner: oh-159-worktree
 created: '2026-09-03'
@@ -83,3 +83,5 @@ that is knowable long before any S3 is involved.
 **Note 2026-11-05:** Step 2, the fixture format: the rv32 corpus case (mnemonic, encoding, width, initial, one oracle cell holding status and writes), with the oracle cell named silicon. It differs in three ways, each forced. initial is the whole register file, never a delta. The case carries its own pc, and the silicon cell records the pc after the step. There is no requires field, because the file-level part names the one chip that executed it. Provenance records the board, captured_on (an argument, never a clock call), the mechanism and the log's sha256. 'check' replays each case through core/riscv32 with webui.boards.esp32c3.ISA and compares all 31 registers and the pc. A load or store faults on the replay's memory and is counted as skipped. A SYSTEM opcode (CSR read) is skipped by name. A file in which nothing was compared exits 1.
 
 **Note 2026-11-05:** Step 3 is NOT done: no capture has been taken. This machine has no OpenOCD, no riscv32-esp-elf-gdb and no ~/.espressif, only esptool. About 12 Espressif USB-JTAG devices are attached (VID 303A PID 1001; COM3/5/7/8/10/11/12/13/14/15/21; chip type of each unknown). They were deliberately not halted, flashed or probed, because they may belong to other work. tests/rv32/test_capture_trace.py proves the harness on synthetic GDB-format logs only: agreement, a wrong result register, a register silicon changed and the core did not, a register the core wrote and silicon did not (the delta hazard), a wrong next pc, an instruction the core cannot execute, a CSR skip, a load skip, and refusal of empty, truncated, one-halt, missing-register, duplicate-register and bytes-not-at-pc logs. Five mutations of the tool were each caught. test_every_committed_capture_replays skips, saying so, until tests/fixtures/hardware/ holds a real capture.
+
+**Note 2026-11-05:** Blocked on hardware: the harness (tools/capture_trace.py, tests/rv32/test_capture_trace.py) is landed; step 3 needs openocd-esp32 and riscv32-esp-elf-gdb installed and consent to halt one of the attached ESP32-C3 boards, which may belong to other work. Run 'python tools/capture_trace.py script --steps 200 > capture.gdb', capture, then 'convert' into tests/fixtures/hardware/ and 'check'.
