@@ -57,6 +57,8 @@ touches:
 - webui/api.py
 - webui/static/emulator.js
 - tests/webui/test_board_run.py
+- core/cortexm0/abi.py
+- tests/webui/test_pin_view.py
 ---
 
 A sketch on an ESP32 board here can set a pin high and wait; it cannot print, time, read a pin, or talk to anything. That is the whole API, and it is honest about it -- every absence carries a hint naming the modelling decision (OH-138) -- but the decisions are now the gap.
@@ -864,3 +866,5 @@ CONFIRMED FOR THE OWNER, with the design's own strongest objection recorded: opt
 **Note 2026-11-05:** 2026-11-05: lends core/cortexm0/abi.py to OH-64 for the Armv7E-M profile switch (cortexm0_set_profile, an ABI bump); they come back when it lands.
 
 **Note 2026-11-05:** 2026-11-05: lends tests/webui/test_pin_view.py to OH-64: the two XIAO-nRF52840 boards now read levels through webui/boards/nrf52840.py, so they leave the silent list and nrf52840 joins the modules that name their pins; it comes back when OH-64 lands.
+
+**Note 2026-11-06:** takes back core/cortexm0/abi.py and tests/webui/test_pin_view.py from OH-64 (done).
