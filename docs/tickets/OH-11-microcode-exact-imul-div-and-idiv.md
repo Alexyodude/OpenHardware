@@ -1,7 +1,7 @@
 ---
 id: OH-11
 title: Microcode-exact IMUL, DIV and IDIV
-status: in-progress
+status: done
 priority: P2
 owner: session/oh-11-wt
 created: '2026-08-23'
