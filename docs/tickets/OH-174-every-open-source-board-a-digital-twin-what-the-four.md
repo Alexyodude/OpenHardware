@@ -2,8 +2,9 @@
 id: OH-174
 title: 'Every open-source board a digital twin: what the four layers are, and the
   order they are reached in'
-status: open
+status: in-progress
 priority: P1
+owner: oh-174-worktree
 created: '2026-09-29'
 touches:
 - docs/tickets/OH-174-*
