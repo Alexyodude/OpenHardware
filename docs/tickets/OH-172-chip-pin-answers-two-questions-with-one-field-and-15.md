@@ -11,7 +11,6 @@ touches:
 - webui/static/board3d-panel.js
 - tests/webui/test_board3d.py
 - tools/import_pindefs.py
-- tests/rules/test_import_pindefs.py
 - webui/boards/XIAO-MG24-SMD.json
 - webui/boards/XIAO-nRF54l15-SMD.json
 - webui/boards/XIAO-nRF54LM20A-SMD.json
@@ -344,3 +343,5 @@ LEFT is as the slice 2 note says, with one item added. A pad its footprint names
 **Note 2026-10-15:** 2026-10-15: tests/webui/test_board3d.py::test_an_accepted_temperature_refreshes_what_the_board_reports_once failed once under heavy load (two full suites at once, OH-166 item 4): the served line read TA 0xC190 where 0xC1E0 was expected. Its whenPosted stub resolves on a timer and the board state changes at that moment, so under load the panel's refetch can be answered before the stub's timer fires. Passed in every other run. Make the stub resolve on a promise the test releases, not a timer. Also from 4c's confirm review: guard visibilitychange with document.hidden; the flush timeout renders even if the panel were torn down.
 
 **Note 2026-10-15:** 2026-10-15: takes back tools/import_pindefs.py, its test and the three XIAO board files from OH-173 (pin_source landed; chip_pin unchanged).
+
+**Note 2026-11-05:** 2026-11-05: lends tests/rules/test_import_pindefs.py to OH-64, whose nRF52840 module joins two checks that name their chips and count their boards on purpose (the chips with header markers, and the boards whose pads agree with a module, 13 to 15); it comes back when that lands.
