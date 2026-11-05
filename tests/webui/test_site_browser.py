@@ -40,9 +40,10 @@ TESTS = REPO / "tests"
 #: compile, which on a slow runner is tens of seconds.
 BOOT_MS = 120_000
 
-#: A board the local server builds and this copy has no compiler for: an
-#: ESP32's, whose compiler is the last OH-244 brings to the page.
-NOT_BUILT_HERE = "XIAO-ESP32-C3-DIP"
+#: A board the local server builds and this copy has no compiler for: a
+#: row of tools/board_manifest.py, whose recipe is its own -- its chip's
+#: with the board's own pin table -- and not the one the copy carries.
+NOT_BUILT_HERE = "Adafruit QT Py ESP32-C3"
 
 
 class _Quiet(http.server.SimpleHTTPRequestHandler):

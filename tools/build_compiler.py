@@ -46,6 +46,14 @@ build here is one of the same sources and not of a lookalike (measured
   framework-arduino-samd and framework-cmsis file for file; Seeed's own 1.8.6
   release for the XIAO's variant; and PlatformIO's framework-cmsis-atmel
   1.2.2 itself, which no upstream release matches.
+- **ESP32-C3, C5 and C6.** PlatformIO's toolchain-riscv32-esp
+  8.4.0+2021r2-patch5 is Espressif's crosstool-NG esp-2021r2-patch5 build,
+  whose every header and libm.a, and its cc1plus, are byte for byte the ones
+  in Espressif's win64 release. Its GCC and binutils are Espressif's forks at
+  the patch4 tags. So: `RISCV_SOURCES`, those forks by commit;
+  `RISCV_RELEASE`, Espressif's build, for the headers and libm.a; the
+  repository's own core in webui/arduino, which is what the ESP32 rows build;
+  and each board's pin table from arduino-esp32, `ESP_PIN_TABLES`.
 
 ## What it costs, and what is never fetched
 
@@ -271,13 +279,86 @@ SEEED_SAMD = Pinned(
     "https://files.seeedstudio.com/arduino/core/samd/ArduinoCore-samd-1.8.6.tar.bz2",
     "8daf5aec9d3e424775cd79cfee2834f81ea14211190e4ceac1652e078a69a13a", 3516211)
 
+#: Espressif's crosstool-NG esp-2021r2-patch5 -- what PlatformIO's
+#: toolchain-riscv32-esp 8.4.0+2021r2-patch5 is -- builds GCC and binutils
+#: from its forks at the patch4 tags (its samples/riscv32-esp-elf config, and
+#: the riscv32-esp-elf-ct-ng.config its release carries), and only newlib and
+#: gdb at patch5. Pinned by commit, since a tag can move: esp-2021r2-patch4
+#: and esp-2021r2-patch4-binutils. GMP, MPFR and MPC are the versions its
+#: cc1 -v names.
+RISCV_SOURCES: tuple[Pinned, ...] = (
+    Pinned("espressif-gcc-3b3d328ad0df.tar.gz",
+           "https://codeload.github.com/espressif/gcc/tar.gz/"
+           "3b3d328ad0dfd53636d2d54e98b77bfcdacefac4",
+           "d117b6a721c5d12d3f7cdf5652f83ecb8ef3aa25f55d7cbbf6834d63b567e6d7", 102904983),
+    Pinned("espressif-binutils-gdb-df444b49d425.tar.gz",
+           "https://codeload.github.com/espressif/binutils-gdb/tar.gz/"
+           "df444b49d425e05f538d7875f8e2162771c74a51",
+           "03e292f4f2250bc2b558d0a5ffe8b52789f61899cf1d5f335b34edee0722a6fa", 60682185),
+    Pinned("gmp-6.2.1.tar.xz", "https://ftp.gnu.org/gnu/gmp/gmp-6.2.1.tar.xz",
+           "fd4829912cddd12f84181c3451cc752be224643e87fac497b69edddadc49b4f2", 2027316),
+    Pinned("mpfr-4.1.0.tar.xz", "https://ftp.gnu.org/gnu/mpfr/mpfr-4.1.0.tar.xz",
+           "0c98a3f1732ff6ca4ea690552079da9c597872d30e96ec28414ee23c95558a7f", 1525476),
+    Pinned("mpc-1.2.1.tar.gz", "https://ftp.gnu.org/gnu/mpc/mpc-1.2.1.tar.gz",
+           "17503d2c395dfcf106b622dc142683c1199431d095367c6aacba6eec30340459", 838731),
+)
+
+#: Espressif's own build, for the headers and the one archive a link opens.
+#: The win64 one, because every file of it the bundle takes -- libm.a and
+#: libstdc++'s headers among them -- is PlatformIO's byte for byte
+#: (and its cc1plus.exe is too), where the linux-amd64 one's libm.a and
+#: c++config.h are not (measured 2026-10-17).
+RISCV_RELEASE = Pinned(
+    "riscv32-esp-elf-gcc8_4_0-esp-2021r2-patch5-win64.zip",
+    "https://github.com/espressif/crosstool-NG/releases/download/esp-2021r2-patch5/"
+    "riscv32-esp-elf-gcc8_4_0-esp-2021r2-patch5-win64.zip",
+    "b08f568e8fe5069dd521b87da21b8e56117e5c2c3b492f73a51966a46d3379a4", 259712666)
+
+#: What RISCV_RELEASE's libm.a and newlib headers are built from (newlib-esp32
+#: at esp-2021r2-patch5), and the crosstool-NG that built them: offered, as
+#: xPack's scripts and newlib are for the SAMD21.
+RISCV_NEWLIB = Pinned(
+    "espressif-newlib-esp32-cb0cca581942.tar.gz",
+    "https://codeload.github.com/espressif/newlib-esp32/tar.gz/"
+    "cb0cca5819424d4d95557d79f76c9275875e3dfd",
+    "42adf3c859c9020d7a3844fd2839c138a84c5de24c4f5af9bbd82bd6dd1b6d22", 21950537)
+CROSSTOOL_ESP = Pinned(
+    "crosstool-NG-esp-2021r2-patch5-src.tar.gz",
+    "https://github.com/espressif/crosstool-NG/releases/download/esp-2021r2-patch5/"
+    "crosstool-NG-esp-2021r2-patch5-src.tar.gz",
+    "a64c2d9b51d16e4c0d01b1333481365850b64f6b6c12173675b1a20ae481a28c", 2295683)
+
+#: Each ESP32 board's pin table, the one header of the vendor's its build
+#: reads. The C3's is PlatformIO's framework-arduinoespressif32 3.20017.241212's,
+#: which is arduino-esp32 2.0.17's; the C5's and the C6's are
+#: third_party/bsp/arduino-esp32's at 2787dab, once that Windows checkout's
+#: CRLFs are LFs.
+ESP_PIN_TABLES: tuple[Pinned, ...] = (
+    Pinned("arduino-esp32-2.0.17-XIAO_ESP32C3-pins_arduino.h",
+           "https://raw.githubusercontent.com/espressif/arduino-esp32/2.0.17/"
+           "variants/XIAO_ESP32C3/pins_arduino.h",
+           "643d122c3b85c32e94d1868cbe833d5ee4c27f15b27e4eaaabd9c6f286d3687b", 790),
+    Pinned("arduino-esp32-2787dabc023c-XIAO_ESP32C5-pins_arduino.h",
+           "https://raw.githubusercontent.com/espressif/arduino-esp32/"
+           "2787dabc023c12d4dbf6d98d224c94ac9b01cdd7/variants/XIAO_ESP32C5/pins_arduino.h",
+           "9e3786b5cc982657cc5d11820eff2849f728e82edf393adb9052587c3e1067d9", 1114),
+    Pinned("arduino-esp32-2787dabc023c-XIAO_ESP32C6-pins_arduino.h",
+           "https://raw.githubusercontent.com/espressif/arduino-esp32/"
+           "2787dabc023c12d4dbf6d98d224c94ac9b01cdd7/variants/XIAO_ESP32C6/pins_arduino.h",
+           "9cdb00a2ef0a3e95826e99cb8b581780cd1ef9db14750a59059be7043dab0360", 1213),
+)
+
 
 #: What the bundle reads, or carries in its source/, besides each toolchain's
-#: sources, which wasm_tools fetches. Every one but XPACK_RELEASE goes into
-#: source/: that one is 261 MB of executables this bundle does not run, and
-#: what it is built from is ARM_SOURCES, NEWLIB and XPACK_SCRIPTS.
+#: sources, which wasm_tools fetches. Every one but the two RELEASES goes
+#: into source/: XPACK_RELEASE and RISCV_RELEASE are 261 and 260 MB of
+#: executables this bundle does not run, and what each is built from is
+#: there -- ARM_SOURCES, NEWLIB, XPACK_SCRIPTS and XBB_HELPER for the one,
+#: RISCV_SOURCES, RISCV_NEWLIB and CROSSTOOL_ESP for the other.
 BUNDLE_PINS = (AVR_RELEASE, AVR_CORE, AVR_LIBC, TOOLCHAIN_AVR, XPACK_RELEASE, XPACK_SCRIPTS,
-               XBB_HELPER, NEWLIB, SAMD_CORE, CMSIS, CMSIS_ATMEL, SEEED_SAMD)
+               XBB_HELPER, NEWLIB, SAMD_CORE, CMSIS, CMSIS_ATMEL, SEEED_SAMD, RISCV_RELEASE,
+               RISCV_NEWLIB, CROSSTOOL_ESP, *ESP_PIN_TABLES)
+RELEASES = (XPACK_RELEASE, RISCV_RELEASE)
 
 
 class Toolchain(NamedTuple):
@@ -298,7 +379,9 @@ class Toolchain(NamedTuple):
 
 AVR = Toolchain("avr", "build-avr.sh", AVR_SOURCES, "/opt/avr", "avr", "7.3.0")
 ARM = Toolchain("arm", "build-arm.sh", ARM_SOURCES, "/opt/arm", "arm-none-eabi", "12.3.1")
-TOOLCHAINS = (AVR, ARM)
+RISCV = Toolchain("riscv", "build-riscv.sh", RISCV_SOURCES, "/opt/riscv", "riscv32-esp-elf",
+                  "8.4.0")
+TOOLCHAINS = (AVR, ARM, RISCV)
 
 #: Where the compiled core and libraries sit in a tool's filesystem, and
 #: where the Uno's Arduino core does.
@@ -421,9 +504,11 @@ def _toolchain_key(toolchain: Toolchain) -> str:
 
 
 def _image_key() -> str:
-    """What the image is a function of: the Dockerfile and every script it copies."""
+    """What the image is a function of: the Dockerfile and every script it
+    copies, which is every build-*.sh beside it and not only TOOLCHAINS'."""
     digest = hashlib.sha256()
-    for name in ("Dockerfile", *(toolchain.script for toolchain in TOOLCHAINS)):
+    scripts = sorted(path.name for path in TOOLCHAIN_DIR.glob("build-*.sh"))
+    for name in ("Dockerfile", *scripts):
         digest.update(_text_of(name))
     return digest.hexdigest()
 
@@ -736,6 +821,123 @@ def samd(root: pathlib.Path, recipe: compiler.Recipe) -> tuple[list[str], dict[s
     return sorted(headers), sources, script
 
 
+RISCV_MULTILIB = "rv32imc/ilp32"
+
+
+def riscv_sysroot(root: pathlib.Path) -> tuple[list[str], list[str]]:
+    """RISCV_RELEASE's headers, and the one archive the ESP32 rows' link opens,
+    under `root` at RISCV's prefix.
+
+    Newlib's headers and GCC's own, whole, as the SAMD21 has them; and
+    libstdc++'s, without the bits/ directories of every other multilib. The
+    link is -nostdlib, so ld opens no start file and no libgcc: it opens the
+    -lm compile.build passes, which both -march=rv32imc and -march=rv32imac
+    find in RISCV_MULTILIB (ld's --trace on the server's link, and gcc's
+    -print-multi-directory for each, measured 2026-10-17).
+
+    Returns the header paths and the link inputs.
+    """
+    top = "riscv32-esp-elf/"
+    target, version = RISCV.target, RISCV.gcc_version
+    newlib = f"{top}{target}/include/"
+    others = f"{newlib}c++/{version}/{target}/"
+    gcc = f"{top}lib/gcc/{target}/{version}/"
+    link = {f"{top}{target}/lib/{RISCV_MULTILIB}/libm.a":
+            f"{RISCV.prefix}/{target}/lib/{RISCV_MULTILIB}/libm.a"}
+
+    def wanted(name: str) -> bool:
+        if name in link:
+            return True
+        if name.startswith(others):
+            return name.startswith(f"{others}{RISCV_MULTILIB}/")
+        return name.startswith((newlib, f"{gcc}include/", f"{gcc}include-fixed/"))
+
+    found: dict[str, bytes] = {}
+    with zipfile.ZipFile(fetch_pinned(RISCV_RELEASE)) as archive:
+        for member in archive.infolist():
+            if not member.is_dir() and wanted(member.filename):
+                found[member.filename] = archive.read(member)
+    absent = [name for name in link if name not in found]
+    absent += [prefix for prefix in (newlib, f"{gcc}include/", f"{others}{RISCV_MULTILIB}/")
+               if not any(name.startswith(prefix) for name in found)]
+    if absent:
+        raise CompilerError(f"{RISCV_RELEASE.name} has none of {absent}")
+    headers = {f"{RISCV.prefix}/{name[len(top):]}": data for name, data in found.items()
+               if name not in link}
+    _write(root, {**headers, **{target_path: found[name] for name, target_path in link.items()}})
+    return sorted(headers), sorted(link.values())
+
+
+#: Where the ESP32 rows' trees sit in a tool's filesystem: the repository's
+#: own core, and each vendor pin table at the package and path the recipe
+#: names it by, under PACKAGES or third_party/bsp.
+OPENHARDWARE = "/openhardware"
+
+
+def _pin_table(relative: str) -> Pinned:
+    """ESP_PIN_TABLES' pin for a recipe's include directory, by the board
+    folder that ends it."""
+    board = posixpath.basename(relative)
+    pins = [pin for pin in ESP_PIN_TABLES if f"-{board}-" in pin.name]
+    if len(pins) != 1:
+        raise CompilerError(f"expected one pinned pin table for {relative}, found "
+                            f"{[pin.name for pin in pins]}")
+    return pins[0]
+
+
+def openhardware(root: pathlib.Path, recipe: compiler.Recipe) -> tuple[list[str], dict[str, str],
+                                                                        list[str], str]:
+    """The repository's own core, the recipe's variant and libraries, and the
+    vendor's pin table for the board, under `root`.
+
+    Returns the header paths, every source the recipe compiles by its path
+    relative to the framework root, the include directories past the variant,
+    and the linker script's path.
+    """
+    files: dict[str, bytes] = {}
+    for tree in (recipe.core, recipe.variant, *(lib.include for lib in recipe.libraries)):
+        for path in sorted((compiler.ARDUINO_LITE / tree).rglob("*")):
+            if path.is_file():
+                relative = path.relative_to(compiler.ARDUINO_LITE).as_posix()
+                files[f"{OPENHARDWARE}/{relative}"] = path.read_bytes()
+    extras = []
+    for relative in (*recipe.extra_includes, *recipe.bsp_includes):
+        files[f"/{relative}/pins_arduino.h"] = fetch_pinned(_pin_table(relative)).read_bytes()
+        extras.append(f"/{relative}")
+    _write(root, files)
+
+    script = f"{OPENHARDWARE}/{recipe.variant}/{recipe.linker_script}"
+    sources = {s: f"{OPENHARDWARE}/{recipe.core}/{s}" for s in recipe.core_sources}
+    sources |= {s: f"{OPENHARDWARE}/{s}" for lib in recipe.libraries for s in lib.sources}
+    absent = [path for path in (*sources.values(), script) if path not in files]
+    if absent:
+        raise CompilerError(f"none of {absent} is in webui/arduino, which the recipe reads")
+    headers = [path for path in files if path.endswith(".h")]
+    return sorted(headers), sources, extras, script
+
+
+def lay_esp32(root: pathlib.Path, recipe: compiler.Recipe) -> Laid:
+    """An ESP32-C3's, C5's or C6's: Espressif's headers and libm.a, the
+    repository's own core bare, and the vendor's pin table for the board."""
+    if recipe.framework != "openhardware" or recipe.variant_package:
+        raise CompilerError(f"lay_esp32 lays out webui/arduino with a vendor pin table, and "
+                            f"this recipe asks for more: {recipe}")
+    headers, link_files = riscv_sysroot(root)
+    core_headers, sources, extras, script = openhardware(root, recipe)
+    return Laid(
+        headers=[*headers, *core_headers], link_files=[*link_files, script], sources=sources,
+        core=f"{OPENHARDWARE}/{recipe.core}", variant=f"{OPENHARDWARE}/{recipe.variant}",
+        library_root=OPENHARDWARE, extras=extras, trailing=[], script=script,
+        # The server names the repository's tree by its whole path on the
+        # machine, which says nothing in a tab; here it is named from the
+        # checkout's root, as Seeed's is.
+        labels=[[f"{OPENHARDWARE}/", "webui/arduino/"],
+                ["/framework-arduinoespressif32/", "<toolchain>/framework-arduinoespressif32/"],
+                ["/arduino-esp32/", "third_party/bsp/arduino-esp32/"],
+                [f"{RISCV.prefix}/", f"<toolchain>/{recipe.toolchain}/"],
+                ["/build/", "<build>/"]])
+
+
 # --- one chip, laid out -------------------------------------------------------------
 
 
@@ -819,7 +1021,9 @@ class Chip(NamedTuple):
     lay: Callable[[pathlib.Path, compiler.Recipe], Laid]
 
 
-CHIPS = (Chip("ATmega328P", AVR, lay_avr), Chip("SAMD21", ARM, lay_samd))
+CHIPS = (Chip("ATmega328P", AVR, lay_avr), Chip("SAMD21", ARM, lay_samd),
+         Chip("ESP32-C3", RISCV, lay_esp32), Chip("ESP32-C5", RISCV, lay_esp32),
+         Chip("ESP32-C6", RISCV, lay_esp32))
 
 
 # --- the driver's commands --------------------------------------------------------
@@ -841,10 +1045,12 @@ def _compile_argv(chip: Chip, recipe: compiler.Recipe, includes: list[str], sour
     return f"{chip.toolchain.target}-{'g++' if cxx else 'gcc'}", argv
 
 
-def _object_path(source: str) -> str:
-    """Where a source's object goes: by its whole name, because the core has
-    both wiring_pulse.c and wiring_pulse.S."""
-    return f"{OBJECTS}/{source.replace('/', '_')}.o"
+def _object_path(chip: Chip, source: str) -> str:
+    """Where a source's object goes: under its chip, because the three ESP32s
+    share one filesystem and compile the same core sources to different
+    objects; and by its whole name, because the AVR core has both
+    wiring_pulse.c and wiring_pulse.S."""
+    return f"{OBJECTS}/{chip.name}/{source.replace('/', '_')}.o"
 
 
 def _compile_job(chip: Chip, recipe: compiler.Recipe, includes: list[str], source: str,
@@ -904,7 +1110,7 @@ def chip_plan(chip: Chip, tools: pathlib.Path, root: pathlib.Path, work: pathlib
     compile_jobs: dict[str, object] = {}
     objects: dict[str, str] = {}
     for name in (*recipe.core_sources, *laid.trailing):
-        objects[name] = _object_path(laid.sources[name])
+        objects[name] = _object_path(chip, laid.sources[name])
         compile_jobs[name] = _compile_job(chip, recipe, plain, laid.sources[name],
                                           objects[name], root)
     libraries = []
@@ -912,12 +1118,12 @@ def chip_plan(chip: Chip, tools: pathlib.Path, root: pathlib.Path, work: pathlib
         include = f"{laid.library_root}/{library.include}"
         own = []
         for name in library.sources:
-            objects[name] = _object_path(laid.sources[name])
+            objects[name] = _object_path(chip, laid.sources[name])
             compile_jobs[name] = _compile_job(chip, recipe, _includes(laid, [include]),
                                               laid.sources[name], objects[name], root)
             own.append(objects[name])
         libraries.append({"header": library.header, "include": include, "objects": own})
-    (root / OBJECTS.lstrip("/")).mkdir(parents=True, exist_ok=True)
+    (root / OBJECTS.lstrip("/") / chip.name).mkdir(parents=True, exist_ok=True)
 
     sketch_driver, sketch_argv = _compile_argv(
         chip, recipe, _includes(laid, [INCLUDE_SENTINEL]), SKETCH, "00.o")
@@ -965,6 +1171,11 @@ def chip_plan(chip: Chip, tools: pathlib.Path, root: pathlib.Path, work: pathlib
     # as in cc1plus's.
     if INCLUDE_SENTINEL in assemble:
         assemble = _collapse(assemble, ("-I", INCLUDE_SENTINEL), LIBRARY_INCLUDES)
+    for command in (cc1plus, assemble):
+        stray = [a for a in command if LIBRARY_INCLUDES in a and a != LIBRARY_INCLUDES]
+        if stray:
+            raise CompilerError(f"expected the library -I placeholder as an argument of its "
+                                f"own, found it inside {stray}: {command}")
     # The driver names collect2 only when it finds one, and LINKER_NAME's
     # fallback is ld itself, given what collect2 would have been -- which,
     # with no LTO, is what collect2 hands ld.
@@ -974,6 +1185,12 @@ def chip_plan(chip: Chip, tools: pathlib.Path, root: pathlib.Path, work: pathlib
     ld = [OBJECTS_HERE if a == OBJECT_SENTINEL else a for a in link_cmd[1:]]
     if ld.count(OBJECTS_HERE) != 1:
         raise CompilerError(f"expected the objects once in the link, got {ld}")
+    # build.js makes each -L directory before ld starts, and reads only the
+    # joined, absolute spelling: any other would be a "cannot find -l" in the
+    # tab and nowhere else.
+    unread = [a for a in ld if a.startswith("-L") and not a.startswith("-L/")]
+    if unread:
+        raise CompilerError(f"expected every -L in the link joined and absolute, got {unread}")
 
     plan = {
         "base": recipe.base,
@@ -1056,6 +1273,12 @@ LICENCES = (
     ("arm-12.3.rel1-newlib-cygwin.tar.xz", "newlib-cygwin/COPYING.LIBGLOSS",
      "newlib-COPYING.LIBGLOSS.txt"),
     ("ARM.CMSIS.6.3.0.pack", "LICENSE", "Apache-2.0.txt"),
+    ("espressif-newlib-esp32-cb0cca581942.tar.gz",
+     "newlib-esp32-cb0cca5819424d4d95557d79f76c9275875e3dfd/COPYING.NEWLIB",
+     "newlib-esp32-COPYING.NEWLIB.txt"),
+    ("espressif-newlib-esp32-cb0cca581942.tar.gz",
+     "newlib-esp32-cb0cca5819424d4d95557d79f76c9275875e3dfd/COPYING.LIBGLOSS",
+     "newlib-esp32-COPYING.LIBGLOSS.txt"),
 )
 
 NOTICE = """The compiler in this copy of OpenHardware
@@ -1143,8 +1366,9 @@ arm/fs/opt/arm/arm-none-eabi/lib/thumb/v6-m/nofp/libstdc++_nano.a
     source/arm-none-eabi-gcc-xpack-2fcd97d20c3f459fd4d7068d7d69954f7352ea44.tar.gz
     and the xbb-helper 2.0.1 they call, source/xbb-helper-2.0.1.tgz, which
     holds the configure and make calls and the patch applied to GCC
-    (patches/gcc-12.3.1-cross.git.patch). The release itself is not copied here -- it is 261 MB, nearly all of it
-    executables this does not use -- and is at
+    (patches/gcc-12.3.1-cross.git.patch). The release itself is not copied
+    here -- it is 261 MB, nearly all of it executables this does not use --
+    and is at
     https://github.com/xpack-dev-tools/arm-none-eabi-gcc-xpack/releases/tag/v12.3.1-1.2
 
 arm/fs/opt/arm/arm-none-eabi/, the rest
@@ -1187,9 +1411,61 @@ arm/fs/framework-cmsis-atmel/
     clause.
     Source: source/framework-cmsis-atmel-1.2.2.tar.gz.
 
+riscv/tools/cc1plus.*
+    GCC 8.4.0's C++ compiler for RISC-V, from Espressif's fork at
+    esp-2021r2-patch4, compiled to WebAssembly, with GMP 6.2.1, MPFR 4.1.0
+    and MPC 1.2.1 linked into it, and GCC's own libbacktrace and copy of zlib.
+    Licence: GPL-3.0-or-later (GCC); LGPL-3.0-or-later (MPFR, MPC, and GMP,
+    whose own terms offer it or GPL-2.0); BSD-3-Clause (libbacktrace, whose
+    notice is licenses/libbacktrace-8-LICENSE.txt); the zlib licence (zlib).
+    Source: source/espressif-gcc-3b3d328ad0df.tar.gz; source/gmp-6.2.1.tar.xz,
+    source/mpfr-4.1.0.tar.xz, source/mpc-1.2.1.tar.gz.
+
+riscv/tools/riscv32-esp-elf-as.*, riscv/tools/riscv32-esp-elf-ld.*,
+riscv/tools/riscv32-esp-elf-objcopy.*
+    GNU binutils 2.35.1, from Espressif's fork at esp-2021r2-patch4-binutils,
+    compiled to WebAssembly, with binutils' own copy of zlib.
+    Licence: GPL-3.0-or-later; the zlib licence (zlib).
+    Source: source/espressif-binutils-gdb-df444b49d425.tar.gz.
+
+riscv/fs/opt/riscv/lib/gcc/, riscv/fs/opt/riscv/riscv32-esp-elf/include/c++/
+    GCC 8.4.0's own headers, and libstdc++'s, from Espressif's
+    esp-2021r2-patch5 release of its riscv32-esp-elf toolchain.
+    Licence: GPL-3.0-or-later with the GCC Runtime Library Exception 3.1.
+    Source: source/espressif-gcc-3b3d328ad0df.tar.gz, built by the
+    crosstool-NG in source/crosstool-NG-esp-2021r2-patch5-src.tar.gz. The
+    release itself is not copied here -- it is 260 MB, nearly all of it
+    executables this does not use -- and is at
+    https://github.com/espressif/crosstool-NG/releases/tag/esp-2021r2-patch5
+
+riscv/fs/opt/riscv/riscv32-esp-elf/, the rest
+    newlib 3.3.0, from Espressif's fork at esp-2021r2-patch5: its headers,
+    and libm.a for rv32imc, from the same release.
+    Licence: newlib's, a set of BSD-style and similar permissive notices,
+    file by file: licenses/newlib-esp32-COPYING.NEWLIB.txt and
+    licenses/newlib-esp32-COPYING.LIBGLOSS.txt.
+    Source: source/espressif-newlib-esp32-cb0cca581942.tar.gz, built by the
+    same crosstool-NG.
+
+riscv/fs/openhardware/, riscv/fs/objects/
+    OpenHardware's own Arduino core for the ESP32-C3, C5 and C6
+    (webui/arduino/ in its repository), and its sources compiled by the
+    compiler above.
+    Licence: MIT, in each file.
+    Source: the files themselves; the repository is the rest.
+
+riscv/fs/framework-arduinoespressif32/, riscv/fs/arduino-esp32/
+    Each board's pin table, pins_arduino.h, from Espressif's arduino-esp32:
+    2.0.17's for the XIAO ESP32-C3, as PlatformIO's
+    framework-arduinoespressif32 3.20017.241212 carries it, and 2787dab's for
+    the XIAO ESP32-C5 and C6.
+    Licence: arduino-esp32's, LGPL-2.1 (PlatformIO's package states
+    LGPL-2.1-or-later); the files state none of their own.
+    Source: the files themselves, and in source/ under their pinned names.
+
 How the WebAssembly was made: source/openhardware/ holds the scripts.
-Dockerfile, build-avr.sh and build-arm.sh compile the sources above with
-Emscripten 5.0.3; build_compiler.py and drive.mjs lay this directory out and
+Dockerfile, build-avr.sh, build-arm.sh and build-riscv.sh compile the
+sources above with Emscripten 5.0.3; build_compiler.py and drive.mjs lay this directory out and
 compile the cores; build.js and worker.js run it in the page. They are
 OpenHardware's own, MIT-licensed, and `python tools/build_compiler.py` in a
 checkout runs them.
@@ -1200,8 +1476,8 @@ libc++, libc++abi and compiler-rt (Apache-2.0 WITH LLVM-exception).
 
 licenses/ holds the licence texts: GPL-3.0, the GCC Runtime Library
 Exception 3.1, LGPL-2.1, LGPL-3.0, Apache-2.0, avr-libc's, newlib's two,
-Atmel's two, libbacktrace's (one per GCC), and Emscripten's, musl's, libc++'s,
-libc++abi's and compiler-rt's.
+Atmel's two, newlib-esp32's two, libbacktrace's (one per GCC), and
+Emscripten's, musl's, libc++'s, libc++abi's and compiler-rt's.
 
 An Uno image built here links the Arduino core (LGPL-2.1-or-later, and SPI's
 GPL-2.0 or LGPL-2.1 if the sketch includes it), avr-libc
@@ -1209,8 +1485,11 @@ GPL-2.0 or LGPL-2.1 if the sketch includes it), avr-libc
 A XIAO SAMD21 image links the SAMD core and Seeed's variant
 (LGPL-2.1-or-later), newlib-nano (its permissive notices), and libgcc and
 libstdc++ (whose exception puts no condition on the image).
-The image stays in your tab; if you distribute one, the core's part of it
-comes with the LGPL's conditions.
+An ESP32 image links OpenHardware's own core (MIT) and nothing else, but
+newlib's libm where the sketch calls into it (its permissive notices); of its
+board's pins_arduino.h (LGPL-2.1) it takes the pin numbers.
+The image stays in your tab; if you distribute an Uno's or a XIAO SAMD21's,
+the core's part of it comes with the LGPL's conditions.
 """
 
 
@@ -1220,6 +1499,9 @@ comes with the LGPL's conditions.
 LEADING_COMMENTS = (
     ("gcc-7.3.0.tar.xz", "gcc-7.3.0/libbacktrace/backtrace.h", "libbacktrace-LICENSE.txt"),
     ("arm-12.3.rel1-gcc.tar.xz", "gcc/libbacktrace/backtrace.h", "libbacktrace-12-LICENSE.txt"),
+    ("espressif-gcc-3b3d328ad0df.tar.gz",
+     "gcc-3b3d328ad0dfd53636d2d54e98b77bfcdacefac4/libbacktrace/backtrace.h",
+     "libbacktrace-8-LICENSE.txt"),
     # Atmel's terms are in every device header and in no file of their own,
     # and samd.h's are another licence than the rest's.
     ("framework-cmsis-atmel-1.2.2.tar.gz", "CMSIS/Device/ATMEL/samd21/include/samd21.h",
@@ -1295,7 +1577,7 @@ def notices(out: pathlib.Path, tools: dict[str, pathlib.Path], sources: bool) ->
     source = out / "source"
     source.mkdir()
     for pin in (*(pin for toolchain in TOOLCHAINS for pin in toolchain.sources),
-                *(pin for pin in BUNDLE_PINS if pin != XPACK_RELEASE)):
+                *(pin for pin in BUNDLE_PINS if pin not in RELEASES)):
         shutil.copyfile(fetch_pinned(pin), source / pin.name)
     ours = source / "openhardware"
     ours.mkdir()
@@ -1348,16 +1630,23 @@ def build(*, sources: bool = True) -> dict[str, object]:
         entries: dict[str, object] = {}
         with tempfile.TemporaryDirectory(prefix="openhardware-compiler-") as scratch:
             for chip in CHIPS:
-                work = pathlib.Path(scratch) / chip.toolchain.name
+                work = pathlib.Path(scratch) / chip.name
                 work.mkdir()
                 root = work / "fs"
                 entry, _ = chip_plan(chip, tools[chip.toolchain.name], root, work,
                                      compiler.RECIPES[chip.name])
                 fs = partial / entry["fs"]  # type: ignore[operator]
                 for path in _chip_files(entry):
-                    target = fs / path.lstrip("/")
+                    source, target = root / path.lstrip("/"), fs / path.lstrip("/")
+                    # The ESP32s share one filesystem: a path an earlier chip
+                    # laid must be the same bytes, or its plan's hash would
+                    # name this chip's file.
+                    if target.exists() and sha256_of(target) != sha256_of(source):
+                        raise CompilerError(
+                            f"{entry['fs']}{path}: {chip.name} lays {sha256_of(source)}, "
+                            f"an earlier chip laid {sha256_of(target)}")
                     target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copyfile(root / path.lstrip("/"), target)
+                    shutil.copyfile(source, target)
                 entries[chip.name] = entry
         for toolchain in TOOLCHAINS:
             shipped = partial / toolchain.name / "tools"

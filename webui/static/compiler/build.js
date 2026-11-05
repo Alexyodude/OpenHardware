@@ -137,6 +137,13 @@ export async function run(tool, argv, inputs) {
     mkdirs(fs, path);
     fs.writeFile(path, bytes);
   }
+  // ld walks a -L directory's own path, `..` and all, so each one must exist
+  // even where the link opens nothing in it: the ESP32s' first is
+  // lib/gcc/riscv32-esp-elf/8.4.0/../../../../riscv32-esp-elf/lib/rv32imc/ilp32,
+  // and no file of theirs is under lib/gcc/riscv32-esp-elf/8.4.0.
+  for (const arg of argv) {
+    if (arg.startsWith("-L/")) mkdirs(fs, `${arg.slice(2)}/.`);
+  }
   mkdirs(fs, `${BUILD_DIR}/.`);
   fs.chdir(BUILD_DIR);
   const status = instance.callMain([...argv]);

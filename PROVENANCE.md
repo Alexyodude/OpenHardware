@@ -533,16 +533,19 @@ it already requires. Checked 2026-10-16.
 
 ### The compiler the static site redistributes, never tracked (OH-244)
 
-`tools/build_compiler.py` writes `build/compiler/`: avr-gcc and
-arm-none-eabi GCC, with their binutils, compiled to WebAssembly; the headers
-and libraries they read; and the Arduino AVR and SAMD cores compiled by them.
+`tools/build_compiler.py` writes `build/compiler/`: avr-gcc,
+arm-none-eabi GCC and riscv32-esp-elf GCC, with their binutils, compiled to
+WebAssembly; the headers and libraries they read; and the Arduino AVR and
+SAMD cores, and this repository's own core for the ESP32s, compiled by them.
 The page fetches one chip's share the first time Build is pressed for a board
 with that chip, and compiles sketches with it in the tab. Publishing it is
 distribution, of GPL and LGPL code. **None of it is in this tree**: `build/`
 is gitignored, and every input is fetched pinned by size and sha256
 (`AVR_SOURCES`, `AVR_RELEASE`, `AVR_CORE`, `AVR_LIBC`, `TOOLCHAIN_AVR`,
 `ARM_SOURCES`, `XPACK_RELEASE`, `XPACK_SCRIPTS`, `NEWLIB`, `SAMD_CORE`,
-`CMSIS`, `CMSIS_ATMEL` and `SEEED_SAMD` in that file). Checked 2026-10-16.
+`CMSIS`, `CMSIS_ATMEL`, `SEEED_SAMD`, `RISCV_SOURCES`, `RISCV_RELEASE`,
+`RISCV_NEWLIB`, `CROSSTOOL_ESP` and `ESP_PIN_TABLES` in that file). Checked
+2026-10-16; the ESP32 rows 2026-10-17.
 
 **Where it is published:** wherever `build/site/` is. `tools/build_site.py`
 builds the bundle, with its `source/`, and copies it into the site as
@@ -556,7 +559,7 @@ What it carries, and under what:
 | the same | GMP 5.0.2 and MPFR 3.1.0, linked into it | LGPL-3.0-or-later |
 | the same | MPC 0.9, linked into it | LGPL-2.1-or-later |
 | the same | GCC's libbacktrace, linked into it | BSD-3-Clause |
-| `cc1plus.*` and `avr-{as,ld,objcopy}.*` | GCC's and binutils' own copies of zlib | the zlib licence |
+| every `cc1plus.*`, and every toolchain's `as`, `ld` and `objcopy` | GCC's and binutils' own copies of zlib | the zlib licence |
 | `avr/tools/avr-{as,ld,objcopy}.*` | binutils 2.26.20160125, Atmel's 3.6.1 snapshot | GPL-3.0-or-later |
 | each tool's `.mjs`, and each `.wasm` | Emscripten 5.0.3's runtime; musl; LLVM's libc++, libc++abi, compiler-rt | MIT or NCSA; MIT; Apache-2.0 WITH LLVM-exception |
 | `avr/fs/opt/avr/lib/gcc/` | GCC's own headers and `libgcc.a`, from Arduino's release | GPL-3.0-or-later WITH GCC-exception-3.1 |
@@ -572,6 +575,14 @@ What it carries, and under what:
 | `arm/fs/framework-arduino-samd/`, `arm/fs/seeed-samd/`, `arm/fs/objects/` | the Arduino SAMD core 1.8.14's headers, SPI and Wire; Seeed's XIAO variant from its SAMD core 1.8.6; their sources compiled | LGPL-2.1-or-later, with the exceptions below |
 | `arm/fs/framework-cmsis/` | Arm's CMSIS 6.3.0 core headers | Apache-2.0 |
 | `arm/fs/framework-cmsis-atmel/` | the ATSAMD21G18A's device headers, as PlatformIO's framework-cmsis-atmel 1.2.2 carries them | Atmel's own licence, below |
+| `riscv/tools/cc1plus.*` | GCC 8.4.0's C++ compiler, from Espressif's fork at esp-2021r2-patch4 | GPL-3.0-or-later |
+| the same | MPFR 4.1.0 and MPC 1.2.1, linked into it; GMP 6.2.1, linked into it | LGPL-3.0-or-later; LGPL-3.0-or-later or GPL-2.0-or-later |
+| the same | GCC 8's libbacktrace, linked into it | BSD-3-Clause |
+| `riscv/tools/riscv32-esp-elf-{as,ld,objcopy}.*` | binutils 2.35.1, from Espressif's fork at esp-2021r2-patch4-binutils | GPL-3.0-or-later |
+| `riscv/fs/opt/riscv/lib/gcc/`, libstdc++'s headers | GCC 8.4.0's own headers and libstdc++'s, from Espressif's esp-2021r2-patch5 release | GPL-3.0-or-later WITH GCC-exception-3.1 |
+| `riscv/fs/opt/riscv/riscv32-esp-elf/`, the rest | newlib 3.3.0's headers and the rv32imc `libm.a`, from the same release, built from Espressif's newlib-esp32 | newlib's BSD-style and similar notices, file by file |
+| `riscv/fs/openhardware/`, `riscv/fs/objects/` | this repository's own core, `webui/arduino/`, and its sources compiled | MIT |
+| `riscv/fs/framework-arduinoespressif32/`, `riscv/fs/arduino-esp32/` | each XIAO ESP32's `pins_arduino.h`, from Espressif's arduino-esp32 (2.0.17 for the C3, 2787dab for the C5 and C6) | LGPL-2.1, arduino-esp32's; the files state none of their own |
 
 Neither core is uniformly LGPL, and the exceptions were read out of each file
 the bundle carries. In the AVR core, the SPI library is offered under "either the GNU General
@@ -607,7 +618,7 @@ How each licence's conditions are met:
   `toolchain-avr` at 368b87a, the scripts that built the release's
   `libgcc.a`, with that release itself; and `source/openhardware/`, the
   scripts that control this compilation: the Dockerfile, which pins its
-  emsdk image by digest, `build-avr.sh`, `build-arm.sh`, `drive.mjs`,
+  emsdk image by digest, `build-avr.sh`, `build-arm.sh`, `build-riscv.sh`, `drive.mjs`,
   `build_compiler.py`, `build.js` and `worker.js`. For the SAMD21: Arm's
   12.3.Rel1 GCC and binutils archives, with GCC's 12-branch `system.h` that
   `build-arm.sh` puts in place of 12.3's -- it differs by the fix for PR 111632
@@ -618,23 +629,35 @@ How each licence's conditions are met:
   `^2.0.1`; 2.0.1 was the only such version on the day the release was
   built.) xPack's release
   itself is not copied: it is 261 MB, nearly all executables the bundle does
-  not run, and is named, with its address, in `NOTICE.txt`. Emscripten is a generally available program
+  not run, and is named, with its address, in `NOTICE.txt`. For the ESP32s:
+  Espressif's GCC and binutils forks, by commit at the esp-2021r2-patch4 tags
+  its patch5 release was built from, with GMP, MPFR and MPC at the versions
+  that release's `cc1 -v` names; and its newlib-esp32 at patch5 with the
+  crosstool-NG source Espressif publishes beside the release, which built the
+  headers and `libm.a` the bundle takes from it. That release is not copied
+  either, for the same reason: 260 MB, and named in `NOTICE.txt`. The pin
+  tables are in `source/` under their pinned names, and the core is this
+  repository's. Emscripten is a generally available program
   used unmodified, which §1 leaves out of the Corresponding Source. The page
-  never fetches `source/`: it is 306 MB, and is there for whoever wants it.
-- **LGPL**, for GMP, MPFR and MPC linked into each `cc1plus`, and for the
-  cores: their source is in `source/` with the rest, and `licenses/` carries
-  LGPL-2.1 and LGPL-3.0 whole.
+  never fetches `source/`: it is 496 MB, and is there for whoever wants it.
+- **LGPL**, for GMP, MPFR and MPC linked into each `cc1plus`, for the cores,
+  and for the ESP32 boards' `pins_arduino.h`, which are LGPL-2.1 from
+  Espressif's Arduino core: their source is in `source/` with the rest, and
+  `licenses/` carries LGPL-2.1 and LGPL-3.0 whole.
 - **Apache-2.0**, for CMSIS: `licenses/Apache-2.0.txt` is the pack's own
   `LICENSE`; the pack has no `NOTICE` file, and its headers are unmodified.
 - **newlib's notices** travel as `licenses/newlib-COPYING.NEWLIB.txt` and
-  `licenses/newlib-COPYING.LIBGLOSS.txt`, from Arm's newlib archive.
+  `licenses/newlib-COPYING.LIBGLOSS.txt`, from Arm's newlib archive, and as
+  `licenses/newlib-esp32-COPYING.NEWLIB.txt` and
+  `licenses/newlib-esp32-COPYING.LIBGLOSS.txt`, from Espressif's.
 - **The notice licences**, BSD, MIT, ISC-style and the FSF's: avr-libc's
   `LICENSE`, libbacktrace's, Emscripten's, musl's `COPYRIGHT` and LLVM's
   texts are in `licenses/`; Barrett's, `Udp.h`'s and the linker script's
   notices travel in their own files, which are carried unmodified. The
   Emscripten texts are copied out of the image that linked the tools, by
   `build-avr.sh`; libbacktrace has no licence file of its own, so its notice
-  is the opening comment of `backtrace.h`, written out by `LEADING_COMMENTS`.
+  is the opening comment of `backtrace.h`, written out by `LEADING_COMMENTS`,
+  once for each GCC whose `cc1plus` links it.
   zlib's licence asks nothing of a binary, and is named anyway.
 - **A bundle without its source is never published.** `--no-sources` builds
   one for tests, and its `NOTICE.txt` opens by saying it may not be
@@ -645,7 +668,10 @@ How each licence's conditions are met:
 
 **A sketch's image** links the core, avr-libc and `libgcc` on the Uno; the
 SAMD core, Seeed's variant, newlib-nano, `libgcc` and libstdc++ on the XIAO
-SAMD21. It is built in the user's tab and never leaves it. The runtime
+SAMD21; this repository's MIT core, and newlib's `libm` where the sketch
+calls into it, on the XIAO ESP32s, which build bare metal (`-nostdlib
+-nostartfiles`) and link no `libgcc`. It is built in the user's tab and never
+leaves it. The runtime
 exception puts no condition on it, nor do newlib's notices; the cores' LGPL
 does if the user distributes the image, and the notice says so.
 

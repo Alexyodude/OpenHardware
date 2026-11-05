@@ -5,7 +5,7 @@
 #
 # Emscripten 5.0.3, the version tools/build_site.py builds the cores with,
 # pinned by digest so a rebuild cannot quietly change compiler. The four
-# packages are what GCC 7.3.0 and binutils 2.26, and GCC 12.3.1 and binutils
+# packages are what GCC 7.3.0, 8.4.0 and 12.3.1, and binutils 2.26, 2.35.1 and
 # 2.40, need on the BUILD side: m4 for GMP, bison and flex for ld's grammar,
 # makeinfo for binutils' docs.
 #
@@ -21,7 +21,9 @@ RUN apt-get update \
       texinfo=7.1-3build2 \
  && rm -rf /var/lib/apt/lists/*
 # One image for every toolchain; tools/build_compiler.py names the script.
-COPY build-avr.sh build-arm.sh /usr/local/bin/
+# By pattern, so a toolchain added later changes its own script and not this
+# file, which every toolchain's key hashes.
+COPY build-*.sh /usr/local/bin/
 # A Windows checkout with core.autocrlf hands bash a script it cannot read.
-RUN sed -i 's/\r$//' /usr/local/bin/build-avr.sh /usr/local/bin/build-arm.sh
+RUN sed -i 's/\r$//' /usr/local/bin/build-*.sh
 ENTRYPOINT ["bash"]

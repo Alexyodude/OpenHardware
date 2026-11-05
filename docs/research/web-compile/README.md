@@ -59,8 +59,8 @@ Blink, delay(500)    PB5 changes every  8,000,000 instructions  (500 ms of 16 MH
 Blink, delay(250)    PB5 changes every  4,000,000 instructions  (250 ms)
 int x = ;  line 2    sketch.cpp:2:23: error: expected primary-expression before ';' token
                      the line quoted under it; the board's state unchanged
-XIAO-ESP32-C3-DIP    Build disabled; "Build it with the local server: python
-                     webui/emulator_server.py from a checkout."
+Adafruit QT Py       Build disabled; "Build it with the local server: python
+  ESP32-C3           webui/emulator_server.py from a checkout."
 requests             the site's own files, and blob: URLs of its own origin; nothing else
 ```
 
@@ -197,14 +197,77 @@ vector table. A browser build has no server image to be byte-identical to, so
 there is nothing to build here yet, and the page's Build says "no compile
 recipe", which is true in both places.
 
-## The ESP32s: the framework costs almost nothing
+## The XIAO ESP32s: built, and the same bytes as the server
 
-The three ESP32 rows do not use Espressif's Arduino framework or ESP-IDF's
-libraries. They build bare metal (`-nostdlib -nostartfiles`) against the
-repository's own `openhardware` core, which is 128 KB of source in
-`webui/arduino/`, with the vendor's pin header for each board. So the cost of
-shipping them is one more compiler: PlatformIO's `toolchain-riscv32-esp`
-8.4.0+2021r2-patch5, whose native `cc1plus` is 17.1 MB, about 14 MB as
-WebAssembly at the AVR's ratio, plus whichever C headers the core includes
-(`<stdint.h>` at least). **It fits**, as the Uno does. It is not built in this change. The boards say to build them with the
-local server until it is.
+The three XIAO ESP32 rows -- C3, C5 and C6 -- do not use Espressif's Arduino
+framework or ESP-IDF's libraries. They build bare metal (`-nostdlib
+-nostartfiles`) against the repository's own `openhardware` core, the source
+in `webui/arduino/`, with the vendor's pin header for each board. So the
+framework costs almost nothing to ship and what a first Build fetches is one
+more compiler: PlatformIO's `toolchain-riscv32-esp` 8.4.0+2021r2-patch5.
+
+That is Espressif's crosstool-NG release esp-2021r2-patch5; its win64 zip is
+byte for byte the files PlatformIO installs (measured 2026-10-17). So
+`build-riscv.sh` compiles Espressif's own GCC 8.4.0 and binutils 2.35.1 forks,
+by commit at the esp-2021r2-patch4 tags patch5 was built from, with that
+release's crosstool-NG arguments, and the bundle takes the C headers and
+`rv32imc/ilp32`'s `libm.a` from the release itself -- the one library a link
+opens.
+
+GCC 8's configure wants C++11 of its host compiler and Emscripten's defaults
+to a later one, which GCC 8's sources do not compile under: `-std=gnu++11`.
+Of `all-gcc`, `gcov` does not build -- it includes `<vector>` after
+`safe-ctype.h`, PR 111632's trouble -- and nothing here ships or runs it.
+
+Measured 2026-11-05, on an eight-thread desktop:
+
+```text
+toolchain from a new Docker volume   12.5 min
+cc1plus.wasm                         12.3 MB
+what a C3's first Build fetches      32.9 MB in 941 files, plan.json's 0.4 MB among them;
+                                     9.4 MB gzipped without plan.json
+  of which                           15.6 MB the four tools
+                                     the rest 926 headers, libm.a and the core's objects
+source/, all three chips             496 MB
+the whole site build, new volumes    30 min 6 s, the three toolchains and their bundles
+```
+
+No framework is shipped: the boards build bare metal against the
+repository's own core, so the ESP32s cost one compiler and its headers, less
+than the SAMD21's. The three chips share that compiler and those headers and
+differ only in their objects.
+
+The plan's ld argv names its `-L` directories by GCC's own spelling,
+`lib/gcc/riscv32-esp-elf/8.4.0/../../../../riscv32-esp-elf/lib/rv32imc/ilp32`,
+and ld resolves that through each directory on the way, so one the bundle
+puts no file in still has to exist: `build.js` makes every `-L` directory
+before a tool starts. Without it a C3's link said `cannot find -lm` in the
+tab, where the server's has the whole install on disk.
+
+**A C3's first Build**, Blink on D10, as the SAMD21's was measured, with the
+CPU at 100% for the whole run from other work, and the Uno's from the same
+minutes beside it:
+
+```text
+                       XIAO ESP32-C3            Uno
+CPU busy 100%          143.3 s, then 0.8 s      23.1 s, then 2.1 s
+```
+
+Not measured quiet; the Uno's own quiet figure, 3.1 s, against 23.1 s here
+is the size of what the load does. Over a network, 9.4 MB gzipped is about
+1.5 s at 50 Mbit/s, and 32.9 MB is 5.3 s where the host does not compress.
+
+**The same bytes as the server** (`tests/webui/test_compile_wasm.py`): on the
+C3, Blink on D10 at 500 and 250, and the core's idioms with Wire; on the C5
+and the C6, Blink and the idioms; and the three chips' Blinks are three
+different images, so a test of one is not a test of another. A syntax error's
+words are the server's. A note pointing into the core's header is the
+server's once the server's whole path to `webui/arduino` on this machine is
+read as the checkout's `webui/arduino`, which is how the tab names it. A link
+error is the server's but for the path ld ran as, which opens each line, and
+collect2's last line, as on the SAMD21. Measured on Windows only, as the
+SAMD21's.
+
+A board-manifest row on an ESP32 -- the Adafruit QT Py ESP32-C3 -- has a
+recipe of its own on the server that the bundle does not carry, so its Build
+says to build it with the local server.

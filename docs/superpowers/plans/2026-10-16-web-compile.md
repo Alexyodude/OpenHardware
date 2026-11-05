@@ -241,12 +241,22 @@ SAMD21     PLAN_FORMAT 2: a chip's plan gains `trailing`, objects linked after t
            tools came out the same bytes; a change to one script rebuilds that toolchain. GCC 12.3 needed GCC's own fix for PR 111632 to
            compile against libc++: its 12 branch's system.h, pinned, put in place by
            build-arm.sh over the 12.3 file it was measured to differ from by that alone
-Source     source/ is 149 MB for the Uno, not ~110; 306 MB with the SAMD21
+ESP32      the three XIAO ESP32s (C3, C5, C6), bare metal on the repository's own core:
+           build-riscv.sh compiles Espressif's GCC 8.4.0 and binutils 2.35.1 forks at the
+           commits their esp-2021r2-patch5 release was built from, with -std=gnu++11 (GCC 8
+           does not compile as later C++); gcov does not build and is not shipped. The
+           headers and rv32imc/ilp32's libm.a come from that release's win64 zip, byte for
+           byte PlatformIO's. Objects are per chip, at /objects/<chip>/; each board's
+           pins_arduino.h is the vendor's, pinned in ESP_PIN_TABLES. The Dockerfile copies
+           build-*.sh, so adding the script rebuilt all three toolchains. A board-manifest
+           row on an ESP32 keeps a server recipe of its own and says to build locally
+Source     source/ is 149 MB for the Uno, not ~110; 306 MB with the SAMD21; 496 MB with
+           the ESP32s
 Measured   docs/research/web-compile/README.md: sizes, first-build times, the SAMD21, RP2040
            and ESP32 answers
 Slices     1-4 done for the Uno. 5: the SAMD21 built the same way and the same bytes;
-           RP2040 has no server recipe to match; the ESP32s' framework is the repository's own 128 KB core, so they need only
-           a riscv32 GCC and fit. 6 done once OH-243 handed build_site.py over (3ea2e1f); the
+           RP2040 has no server recipe to match; the XIAO ESP32s built the same way and the
+           same bytes. 6 done once OH-243 handed build_site.py over (3ea2e1f); the
            Pages workflow's timeout is 90 minutes for the compiler's Docker build, which no
            run of the workflow has measured yet
 ```

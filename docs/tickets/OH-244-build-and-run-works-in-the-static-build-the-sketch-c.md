@@ -71,12 +71,31 @@ quiet machine. PROVENANCE.md records the ARM licences, and one judgement for
 the owner: Atmel's device headers "may only be redistributed and used in
 connection with an Atmel microcontroller product".
 
-Left, in order:
+## Progress, 2026-11-05
 
-- The ESP32s turned out to need no framework worth the name -- the
-  repository's own 128 KB core, bare metal -- so they fit, and need only a
-  riscv32-esp GCC 8.4.0 built the same way. They say to build locally until
-  then.
+The three XIAO ESP32s -- C3, C5 and C6 -- build in the tab too. They build
+bare metal against the repository's own core, so the framework costs nothing
+to ship and the cost is one compiler: Espressif's GCC 8.4.0 and binutils
+2.35.1 forks, at the commits their esp-2021r2-patch5 release (PlatformIO's
+`toolchain-riscv32-esp`, byte for byte) was built from, compiled to
+WebAssembly by `tools/wasm_toolchain/build-riscv.sh` in the same image, with
+the headers and `libm.a` from that release. On each chip Blink and the core's
+idioms with Wire are the server's bytes, as is the C3's Blink with its delay
+edited; a syntax error's words are the server's, and a header note's and a
+link error's are too but for the spellings the tests name. In the page, a
+C3's Blink builds in the tab to the server's 300 bytes. Its first Build
+fetches 32.9 MB in 941 files, 9.4 MB gzipped, and took 143.3 s with the CPU
+at 100% from other work (the Uno's took 23.1 s in the same minutes, 3.1 s
+quiet); a second took 0.8 s. The link needed `build.js` to make each `-L`
+directory, which ld walks through by name.
+PROVENANCE.md records the riscv licences. A board-manifest row on an ESP32,
+the Adafruit QT Py ESP32-C3, has a server recipe of its own and still says to
+build locally.
+
+Left:
+
 - The RP2040 has no server recipe, so there is nothing to match.
-- PROVENANCE.md goes back to OH-163's touches once this ticket's last licence
-  record is in, the ESP32s'.
+- OH-247: SPI.cpp's `__FILE__` in a SAMD21 image, which waits on
+  `webui/compile.py`.
+- PROVENANCE.md goes back to OH-163's touches: the ESP32s' licence record,
+  this ticket's last, is in.

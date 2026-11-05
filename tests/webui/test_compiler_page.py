@@ -47,8 +47,11 @@ SITE = REPO / "build" / "site"
 BOARD = "Arduino Uno"
 #: The copy's second chip, whose compiler is arm-none-eabi GCC's.
 SAMD_BOARD = "XIAO-SAMD21-DIP"
-#: A board the server builds and this copy does not: an ESP32-C3's.
-OTHER_BOARD = "XIAO-ESP32-C3-DIP"
+#: The copy's third toolchain's first chip, riscv32-esp-elf GCC's.
+ESP_BOARD = "XIAO-ESP32-C3-DIP"
+#: A board the server builds and this copy does not: a row of
+#: tools/board_manifest.py, whose recipe is its own and not its chip's.
+OTHER_BOARD = "Adafruit QT Py ESP32-C3"
 
 #: Long, because the first request waits for Pyodide to boot and the cores to
 #: compile, as tests/webui/test_site_browser.py's BOOT_MS says.
@@ -338,6 +341,79 @@ def test_the_xiao_samd21_fetches_its_own_chips_compiler_and_not_the_unos(xiao, s
 def test_no_request_the_xiao_samd21_build_makes_leaves_the_site(xiao, served):
     origin = served.split(f"/{SITE.name}/")[0]
     assert [url for url in xiao["asked"]
+            if not url.startswith((served, f"blob:{origin}/"))] == []
+
+
+# --- the XIAO ESP32-C3 ----------------------------------------------------------
+
+#: D10, a pad every XIAO's vendor table names. delay(1) is 160,000 of the
+#: C3's instructions (tests/webui/esp32_timing.py: its SYSTIMER's rate, read
+#: from its description), so RUN_STEPS at a time lands on both levels.
+ESP_SKETCH = """void setup() { pinMode(D10, OUTPUT); }
+void loop() {
+  digitalWrite(D10, HIGH);
+  delay(1);
+  digitalWrite(D10, LOW);
+  delay(1);
+}
+"""
+
+#: D10's level after each of twenty runs of RUN_STEPS.
+D10_LEVELS = f"""async () => {{
+  const seen = [];
+  for (let i = 0; i < 20; i++) {{
+    await fetch('/api/board/run', {{method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{steps: {RUN_STEPS}}})}});
+    seen.push((await (await fetch('/api/board/state')).json()).pins['D10']);
+  }}
+  return seen;
+}}"""
+
+
+@pytest.fixture(scope="module")
+def esp32(browser, served) -> dict[str, object]:
+    """One visit that builds ESP_SKETCH for the XIAO ESP32-C3 in a context of
+    its own: what it asked for, what the page said, and what D10 did."""
+    context = browser.new_context(viewport={"width": 1400, "height": 1000})
+    asked: list[str] = []
+    context.on("request", lambda request: asked.append(request.url))
+    page = context.new_page()
+    page.goto(served)
+    page.wait_for_function(READY, timeout=BOOT_MS)
+    _pick(page, ESP_BOARD)
+    seen: dict[str, object] = {"ready_report": page.text_content("#sketch-report")}
+    _build(page, ESP_SKETCH, ENDED)
+    seen["built_report"] = page.text_content("#sketch-report")
+    seen["d10"] = page.evaluate(D10_LEVELS)
+    seen["asked"] = asked
+    context.close()
+    return seen
+
+
+def test_the_xiao_esp32_c3_says_it_builds_in_this_tab(esp32):
+    assert esp32["ready_report"] == "Builds in this tab. The first build fetches the compiler, once."
+
+
+def test_a_sketch_builds_and_loads_on_the_xiao_esp32_c3_in_the_tab(esp32):
+    assert "bytes on" in esp32["built_report"], esp32["built_report"]
+
+
+def test_the_sketch_built_in_the_tab_drives_d10_both_ways_on_the_xiao_esp32_c3(esp32):
+    assert {"high", "low"} <= set(esp32["d10"]), esp32["d10"]
+
+
+def test_the_xiao_esp32_c3_fetches_its_own_chips_compiler_and_no_other(esp32, served):
+    compiler = f"{served}compiler/"
+    fetched = {url[len(compiler):].split("/")[0] for url in esp32["asked"]
+               if url.startswith(compiler)}
+    assert ("riscv" in fetched, "avr" in fetched, "arm" in fetched) == (True, False, False), \
+        sorted(fetched)
+
+
+def test_no_request_the_xiao_esp32_c3_build_makes_leaves_the_site(esp32, served):
+    origin = served.split(f"/{SITE.name}/")[0]
+    assert [url for url in esp32["asked"]
             if not url.startswith((served, f"blob:{origin}/"))] == []
 
 

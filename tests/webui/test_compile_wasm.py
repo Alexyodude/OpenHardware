@@ -6,13 +6,14 @@
 # ## What is compared
 #
 # Each sketch here is built twice: by `webui/compile.py`, with PlatformIO's
-# avr-gcc or arm-none-eabi GCC, which is what the local server's Build button
+# avr-gcc, arm-none-eabi GCC or riscv32-esp-elf GCC, which is what the local
+# server's Build button
 # runs; and by `webui/static/compiler/build.js`, the module the static page's
 # Worker runs, over the bundle `tools/build_compiler.py` makes -- the same GCC
 # compiled to WebAssembly from the sources PlatformIO's was built from. The
 # images must be the same bytes. Not "both run": the same bytes, so the
 # browser build needs no emulator test of its own to be trusted. The Uno's
-# samples come first, then the XIAO SAMD21's.
+# samples come first, then the XIAO SAMD21's, then the XIAO ESP32s'.
 #
 # The samples are the ones that would show a difference if there were one:
 # Blink at two delays (the verification the owner asked for edits that
@@ -183,8 +184,48 @@ void setup() { mySPI.begin(); mySPI.transfer(0x55); }
 void loop() {}
 """
 
-#: A board the server builds and this bundle does not: an ESP32-C3's.
-OTHER_BOARD = "XIAO-ESP32-C3-DIP"
+#: The bundle's third toolchain, riscv32-esp-elf GCC 8.4.0, for three chips.
+ESP_BOARD = "XIAO-ESP32-C3-DIP"
+ESP_C5_BOARD = "XIAO-ESP32-C5-DIP"
+ESP_C6_BOARD = "XIAO-ESP32-C6-DIP"
+
+#: Blink on D10, a pin every XIAO's vendor table names: the ESP32 rows build
+#: the repository's own core, whose LED_BUILTIN is the vendor's, and on these
+#: boards that is no GPIO the model drives (webui/compile.py's hint says why).
+ESP_BLINK_500 = """void setup() { pinMode(D10, OUTPUT); }
+void loop() {
+  digitalWrite(D10, HIGH);
+  delay(500);
+  digitalWrite(D10, LOW);
+  delay(500);
+}
+"""
+ESP_BLINK_250 = ESP_BLINK_500.replace("delay(500)", "delay(250)")
+
+#: Everything the ESP32 rows' core carries: Wire, its one library; the UART's
+#: transmit half; SYSTIMER's millis and micros; GPIO_IN; ADC1.
+ESP_IDIOMS = """
+#include <Wire.h>
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  Wire.beginTransmission(0x3C);
+  Wire.write(0x00);
+  Wire.endTransmission();
+  pinMode(D2, INPUT_PULLUP);
+  Serial.println(digitalRead(D2));
+  Serial.println(analogRead(A0));
+  Serial.println(millis());
+  Serial.println(micros());
+  delayMicroseconds(10);
+}
+void loop() {}
+"""
+
+#: A board the server builds and this bundle does not: a row of
+#: tools/board_manifest.py, whose recipe is its own -- the C3's with the
+#: board's own pin table -- and not the chip's this bundle carries.
+OTHER_BOARD = "Adafruit QT Py ESP32-C3"
 
 
 def server(source: str, board: str = BOARD) -> compiler.Build:
@@ -229,6 +270,16 @@ def wasm(tmp_path_factory) -> dict[str, dict]:
         "samd_header_note": (SAMD_BOARD, HEADER_NOTE),
         "samd_link_error": (SAMD_BOARD, LINK_ERROR),
         "samd_own_spi": (SAMD_BOARD, SAMD_OWN_SPI),
+        "esp_blink_500": (ESP_BOARD, ESP_BLINK_500),
+        "esp_blink_250": (ESP_BOARD, ESP_BLINK_250),
+        "esp_idioms": (ESP_BOARD, ESP_IDIOMS),
+        "esp_syntax_error": (ESP_BOARD, SYNTAX_ERROR),
+        "esp_header_note": (ESP_BOARD, HEADER_NOTE),
+        "esp_link_error": (ESP_BOARD, LINK_ERROR),
+        "esp_c5_blink": (ESP_C5_BOARD, ESP_BLINK_500),
+        "esp_c5_idioms": (ESP_C5_BOARD, ESP_IDIOMS),
+        "esp_c6_blink": (ESP_C6_BOARD, ESP_BLINK_500),
+        "esp_c6_idioms": (ESP_C6_BOARD, ESP_IDIOMS),
     }
     work = tmp_path_factory.mktemp("compile-wasm")
     job = {"bundle": str(BUNDLE), "result": str(work / "result.json"),
@@ -404,9 +455,95 @@ def test_a_samd21_sketch_with_its_own_spi_bus_names_spi_cpp_by_each_sides_own_pa
     server's, its own install path under PACKAGES; the tab's, the core's path
     in the bundle. The two images differ by that string and whatever its
     length moves. compile.py is not changed by this ticket; giving both sides
-    one path for the core is a ticket of its own, and when it lands, the last
-    of these three goes True and this becomes a same-bytes test."""
+    one path for the core is OH-247, and when it lands all three of these
+    turn over -- neither image holds its own path any more, and the two are
+    one -- and this becomes a same-bytes test."""
     tab, there = image(wasm["samd_own_spi"]), server(SAMD_OWN_SPI, SAMD_BOARD).image
     spi = compiler.PACKAGES / "framework-arduino-samd" / "libraries" / "SPI" / "SPI.cpp"
     assert ((b"/framework-arduino-samd/libraries/SPI/SPI.cpp" in tab),
             (str(spi).encode() in there), (tab == there)) == (True, True, False)
+
+
+def test_every_esp32_sample_meant_to_build_builds(wasm):
+    """So no comparison of images below is of two empty ones."""
+    samples = ("esp_blink_500", "esp_blink_250", "esp_idioms", "esp_c5_blink", "esp_c5_idioms",
+               "esp_c6_blink", "esp_c6_idioms")
+    assert {name: wasm[name]["ok"] for name in samples} == dict.fromkeys(samples, True)
+
+
+def test_esp32_c3_blink_is_the_servers_bytes(wasm):
+    assert image(wasm["esp_blink_500"]) == server(ESP_BLINK_500, ESP_BOARD).image
+
+
+def test_esp32_c3_blink_with_its_delay_edited_is_the_servers_bytes(wasm):
+    assert image(wasm["esp_blink_250"]) == server(ESP_BLINK_250, ESP_BOARD).image
+
+
+def test_esp32_c3_blink_edited_is_a_different_image_from_blink(wasm):
+    assert image(wasm["esp_blink_250"]) != image(wasm["esp_blink_500"])
+
+
+def test_esp32_c3_every_idiom_with_wire_is_the_servers_bytes(wasm):
+    assert image(wasm["esp_idioms"]) == server(ESP_IDIOMS, ESP_BOARD).image
+
+
+def test_esp32_c5_blink_is_the_servers_bytes(wasm):
+    """rv32imac, and the C5's own pin table from third_party/bsp."""
+    assert image(wasm["esp_c5_blink"]) == server(ESP_BLINK_500, ESP_C5_BOARD).image
+
+
+def test_esp32_c5_every_idiom_with_wire_is_the_servers_bytes(wasm):
+    assert image(wasm["esp_c5_idioms"]) == server(ESP_IDIOMS, ESP_C5_BOARD).image
+
+
+def test_esp32_c6_blink_is_the_servers_bytes(wasm):
+    """rv32imac, and the C6's pin table, which includes the variant's own
+    soc/soc_caps.h."""
+    assert image(wasm["esp_c6_blink"]) == server(ESP_BLINK_500, ESP_C6_BOARD).image
+
+
+def test_esp32_c6_every_idiom_with_wire_is_the_servers_bytes(wasm):
+    assert image(wasm["esp_c6_idioms"]) == server(ESP_IDIOMS, ESP_C6_BOARD).image
+
+
+def test_the_three_esp32s_build_three_different_images_of_one_sketch(wasm):
+    """One sketch, three images: D10 is a different GPIO on each board and
+    each links its own variant's script. That each chip's objects are its
+    own is what the per-chip same-bytes tests above hold."""
+    images = {image(wasm[name]) for name in ("esp_blink_500", "esp_c5_blink", "esp_c6_blink")}
+    assert len(images) == 3
+
+
+def test_an_esp32_syntax_error_fails_with_no_image(wasm):
+    assert (wasm["esp_syntax_error"]["ok"], image(wasm["esp_syntax_error"])) == (False, b"")
+
+
+def test_an_esp32_syntax_errors_diagnostics_are_the_servers_words(wasm):
+    assert wasm["esp_syntax_error"]["diagnostics"] == server(SYNTAX_ERROR, ESP_BOARD).diagnostics
+
+
+def test_an_esp32_note_in_the_core_names_it_from_the_checkout_as_the_server_does(wasm):
+    """The server names webui/arduino by its whole path on the machine, which
+    says nothing in a tab; the tab names it from the checkout's root. Read
+    so, and with the server's separators made the tab's, the words, the
+    quoted line and its caret are the same."""
+    lite = str(compiler.ARDUINO_LITE).replace("\\", "/")
+    there = (server(HEADER_NOTE, ESP_BOARD).diagnostics.replace("\\", "/")
+             .replace(lite, "webui/arduino"))
+    assert wasm["esp_header_note"]["diagnostics"] == there
+
+
+def test_an_esp32_link_error_is_the_servers_but_for_how_each_spells_the_toolchain(wasm):
+    """As the SAMD21's: binutils 2.35 also opens each line with the path ld
+    ran as, which differs, and the server's last line is collect2's. The
+    build directory is `<build>` on both sides once the server's separator is
+    the tab's."""
+    there = re.sub(r"^\S*/bin/ld(\.exe)?: ", "",
+                   server(LINK_ERROR, ESP_BOARD).diagnostics.replace("\\", "/"), flags=re.M)
+    tab = re.sub(r"^\S*/riscv32-esp-elf-ld: ", "", wasm["esp_link_error"]["diagnostics"],
+                 flags=re.M)
+    assert tab.splitlines() == there.splitlines()[:-1]
+
+
+def test_an_esp32_link_error_names_the_function_it_could_not_find(wasm):
+    assert "undefined reference to `nothere()'" in wasm["esp_link_error"]["diagnostics"]
