@@ -2,7 +2,7 @@
 id: OH-165
 title: A wire segment passes between two nodes through a pin header, and inside, proud
   and stretch all read clean
-status: in-progress
+status: done
 priority: P2
 created: '2026-09-05'
 touches:
@@ -51,3 +51,5 @@ Found while measuring OH-162 step 3, which was declined; that ticket's note carr
 **Note 2026-11-05:** The review pass (a separate reviewer agent) found no defect in the probe. It found six in the tests, now fixed. proud was read with no radius, which made it vacuous; it is now contact(rope.radius). A mutant that only tried crossings on the same axis survived; a cross-axis case kills it. Nothing tested the sphere dispatch or the max across colliders; tests now cover both. Two equalities were exact; they now have tolerances. The xfail now expects only AssertionError, and run() raises RuntimeError on a node crash, so a crash cannot satisfy it. The stretch bound had 0.5% headroom and is now 2.5%. Ten mutants in all, and each fails at least one test. Not fixed: a rope whose positions are NaN reads 0 from the probe. That is a blown-up rope, which test_wires.py's energy tests exist to catch, not a probe question.
 
 **Note 2026-11-05:** Landing came back refused at the claim check, with nothing pushed. The rebase was clean, the probe tests gave 6 passed and 1 xfailed, and the full suite failed only OH-250's five known composer tests. The check diffs merge-base..HEAD and judges the whole range as OH-165, so the commit that files OH-251, which was made under OH_TICKET=OH-251, read as OH-165 editing OH-251's file. The fix is to land the OH-251 filing commit first, alone, under OH_TICKET=OH-251, and then land OH-165's commits on top of it as OH-165.
+
+**Note 2026-11-05:** Done: steps 1 and 2 landed; step 3 is OH-251.
