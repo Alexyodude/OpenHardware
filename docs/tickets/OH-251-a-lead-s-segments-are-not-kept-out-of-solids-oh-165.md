@@ -2,7 +2,7 @@
 id: OH-251
 title: 'A lead''s segments are not kept out of solids: OH-165''s probe measures it,
   nothing in collide prevents it'
-status: blocked
+status: open
 priority: P2
 created: '2026-11-05'
 ---
@@ -18,3 +18,5 @@ The candidates OH-165 names: segment-against-box in `collide`; a node count that
 **Note 2026-11-05:** Blocked on OH-162: the fix needs webui/static/wires.js and tests/webui/test_wires.py, which OH-162 claims until its step 4 (the photograph that justifies changing every drape) is done. Unblock it when OH-162 closes.
 
 **Note 2026-11-05:** When the fix lands, test_the_probe_sees_a_lead_the_node_readings_call_clean in tests/webui/test_wire_probe.py fails by design. It records the defect: the 12, 20 and 28 rows read through > 0. Rewrite its last assertions as every row reading 0, and remove the strict xfail on the test beside it.
+
+**Note 2026-11-22:** 2026-11-22: OH-162 is done, so the blocker is gone. Open.

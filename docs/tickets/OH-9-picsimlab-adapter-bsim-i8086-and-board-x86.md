@@ -1,7 +1,7 @@
 ---
 id: OH-9
 title: 'PICSimLab adapter: bsim_i8086 and board_x86'
-status: blocked
+status: open
 priority: P3
 owner: session/adapter
 created: '2026-08-23'
@@ -31,3 +31,5 @@ Also: 4a.6 records that the NOGUI build fails to link but 'the WX GUI build is u
 2. Nothing in this ticket needs NOGUI. The adapter work (bsim_i8086, board_x86) compiles into PICSimLab either way, and 4a.6 records that the WX GUI build works on this machine. So development can proceed against the GUI build now; NOGUI is a packaging concern for spec section 8.4 only.
 
 And for the ESP route specifically: the prebuilt NOGUI AppImage bundles lib/qemu -- libqemu-riscv32, libqemu-xtensa and the ESP ROM images -- because build_appimage.sh copies it into the AppDir. That is exactly the stack the ESP path needs, with no build at all. Verified: the asset is 16,435,704 bytes and returns HTTP 200.
+
+**Note 2026-11-22:** 2026-11-22: the prebuilt PICSimLab AppImage exists (see the 2026-08-24 correction above), so the blocker is gone. Open.
